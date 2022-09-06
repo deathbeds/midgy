@@ -2,6 +2,10 @@
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
+
+[tool.hatch.build.targets.sdist]
+[tool.hatch.build.targets.wheel]
+
 [project]
 name = "midgy"
 description = "run markdown as python code"
@@ -9,9 +13,7 @@ readme = "README.md"
 requires-python = ">=3.7"
 license-files = { paths = ["LICENSE"] }
 keywords = []
-authors = [
-  { name = "tonyfast", email = "tony.fast@gmail.com" },
-]
+authors = [{ name = "tonyfast", email = "tony.fast@gmail.com" }]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Natural Language :: English",
@@ -23,13 +25,15 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
-  "License :: OSI Approved :: BSD License"
+  "License :: OSI Approved :: BSD License",
 ]
 dependencies = ["markdown-it-py"] # no dependencies!
 dynamic = ["version"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+black = ["black"]
+rich = ["rich"]
 
 [project.scripts]
 midgy = "midgy:main"
@@ -51,4 +55,3 @@ addopts = "-pno:warnings --verbose --doctest-modules --current-env --sanitize-wi
 
 [tool.coverage.html]
 directory = "docs/coverage"
-
