@@ -1,13 +1,36 @@
+"""markdown-it-py conventions for lexing and rendering markdown."""
 from io import StringIO
-from textwrap import indent
 
 from markdown_it import MarkdownIt
 
 SPACE = " "
 
 
-class Renderer(MarkdownIt):
-    """the base renderer for translating markdown input"""
+class MarkdownIt(MarkdownIt):
+    """an overloaded MarkdownIt class
+
+the midgy markdown lexer includes rules for:
+
+1. shebang line
+
+    shebangs happen when the first line of document begins with `#!`.
+    we require this rule because it is only the thing that can preclude
+    front matter. a feature of this rule is that it is a comment in python
+    therefore the python renderer doesn't have to to do much.
+
+2. front matter
+
+    most front matter rules begin on the first line, but we allow for shebangs and white space.
+    the front matter block is wrapped a code that is executed. `+++` and `---` trigger `toml` and `yaml`
+    front matter respectively.
+
+3. doctest
+
+    midgy is a literate programming design, and we add doctests because they are 
+    an accepted literate programming convention in python. our doctests are triggered
+    inside indented code blocks.
+    
+"""
 
     def __init__(self, *args, **kwargs):
         renderer = kwargs.pop("renderer_cls", Markdown)
@@ -50,15 +73,18 @@ class Renderer(MarkdownIt):
 
 
 class Markdown:
-    """a renderer_cls to be used with a Renderer"""
+    """a renderer_cls to be used with a MarkdownIt"""
 
     def generic_lines(self, env, next=None):
+        """yield the lines of content in a generic block."""
         yield from self.yieldlines(next.map[0], env) if next else env["source"]
 
     def generic(self, env, next=None):
+        """a generic visitor that returns the raw content"""
         return "".join(self.generic_lines(env, next))
 
     def walk(self, tokens, options, env):
+        """walk the markdown tokens"""
         for token in tokens:
             if hasattr(self, token.type):
                 yield getattr(self, token.type)(token, options, env)
@@ -66,6 +92,7 @@ class Markdown:
             yield self.generic(env)
 
     def render(self, tokens, options, env):
+        """render markdown"""
         for block in self.walk(tokens, options, env):
             print(block, file=env["target"], end="")
         else:
@@ -82,24 +109,3 @@ class Markdown:
         """read multiple lines until you want to stop"""
         while env["last_line"] < stop:
             yield self.readline(env)
-
-
-
-def main(file=None, module=None, code=None):
-    """compare markdown and python sources"""
-    if file is module is code is None:
-        from .__main__ import default_parser
-        default_parser(__name__)
-
-def parser(parent=None):
-    if parent is None:
-        from .__main__ import default_parser as parent
-        parent = parent(__name__, description=__doc__)
-        parent.add_argument("-p", "--py", action="store_false")
-    
-
-
-if __name__ == "__main__":
-    from .__main__ import default_parser as parent
-    parser = default_parser(__name__, description=__doc__)
-    run
