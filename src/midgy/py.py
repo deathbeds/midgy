@@ -1,53 +1,78 @@
-"""render markdown as python code
+"""a minimal conversion from markdown to python code based on indented code blocks"""
 
-this module exports the renderer class to transform
-markdown into python using midgy conventions."""
+from dataclasses import dataclass
+from textwrap import dedent, indent
 
-from functools import partial
-from .md import Markdown, MarkdownIt, SPACE
-from io import StringIO
-from re import compile
+from .tangle import Tangle
 
-ESCAPE = {x: "\\" + x for x in "'\""}
-ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
+__all__ = "Python", "md_to_python"
+SP = chr(32)
 
-escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
+# the Python class translates markdown to python with the minimum number
+# of modifications necessary to have valid python code. midgy will:
+## add triple quotes to make python block strings of markdown blocks
+## escape quotes in markdown blocks
+## add indents to conform with python concepts
+# overall spaces, quotes, unicode escapes will be added to your markdown source.
+@dataclass
+class Python(Tangle):
+    """a line-for-line markdown to python translator"""
 
+    markdown_is_block_string: bool = True
+    docstring_block_string: bool = True
+    quote_char: str = chr(34)
+    front_matter_loader = '__import("midgy").front_matter.load'
 
-class Config:
-    markdown_is_block_string = True
-    docstring_block_string = True
-    quote_char = '"'
-    formatter = None
+    def code_block(self, token, env):
+        ref = env["min_indent"]
+        for line in self.get_block(env, token.map[1]):
+            right = line.lstrip()
+            yield line[ref:] if right else line
 
+    def comment(self, body, env):
+        return indent(dedent("".join(body)), SP * self._compute_indent(env) + "# ")
 
-class Python(Markdown, Config):
-    """a line-for-line markdown to python renderer"""
+    def doctest(self, token, env):
+        if self.docstring_block_string and self.markdown_is_block_string:
+            return
+        yield from self.non_code(env, token)
+        yield (self.comment(self.get_block(env, token.map[1]), env),)
 
-    def compose_generic_string(self, body, env, lead="", pre="", trail=""):
-        """compose a block string.
-        lead applies to first line, pre applies to every other line,"""
+    def fence(self, token, env):
+        if token.info == "pycon":
+            yield from self.doctest(token, env)
 
-        left = body.rstrip()
-        if not left:
-            return body
-        old, new = StringIO(left), StringIO()
-        if lead:
-            # this loop breaks at the first populated line.
-            # it indents and quotes the first line then breaks.
-            for line in old:
-                any = bool(line.lstrip())
-                any and print(lead, file=new, end="")
-                print(escape(line), file=new, end="")
-                if any:
-                    break
+    def front_matter(self, token, env):
+        trail = self.quote_char * 3
+        lead = f"locals().update({self.front_matter_loader}(" + trail
+        trail += "))"
+        body = self.get_block(env, token.map[1])
+        yield from self.wrap_lines(body, lead=lead, trail=trail)
 
-        for line in old:
-            print(pre, escape(line), file=new, end="", sep="")
-        print(trail, body[len(left) :], file=new, end="")
-        return new.getvalue()
+    def non_code(self, env, next=None):
+        if env.get("quoted_block", False):
+            yield from super().non_code(env, next)
+        elif self.markdown_is_block_string:
+            yield from self.non_code_block_string(env, next)
+        else:
+            yield from self.non_code_comment(env, next)
 
-    def compute_generic_lead(self, env, next=None):
+    def non_code_block_string(self, env, next=None):
+        body = super().non_code(env, next)
+        trail = self.quote_char * 3
+        lead = SP * self._compute_indent(env) + trail
+        trail += "" if next else ";"
+        yield from self.wrap_lines(body, lead=lead, trail=trail)
+
+    def non_code_comment(self, env, next=None):
+        yield self.comment(super().non_code(env, next), env)
+
+    def shebang(self, token, env):
+        yield "".join(self.get_block(env, token.map[1]))
+
+    def _compute_indent(self, env):
+        """compute the indent for the first line of a non-code block."""
+        next = env.get("next_code")
         next_indent = next.meta["first_indent"] if next else 0
         spaces = prior_indent = env.get("last_indent", 0)
         if env.get("colon_block", False):  # inside a python block
@@ -55,53 +80,13 @@ class Python(Markdown, Config):
                 spaces = next_indent  # prefer greater trailing indent
             else:
                 spaces += 4  # add post colon default spaces.
-        return SPACE * (spaces - env.get("reference_indent", 0))
+        return spaces - env.get("min_indent", 0)
 
-    def generic(self, env, next=None):
-        body = super().generic(env, next)
-        if env.get("quoted_block"):
-            return body
-        trail = self.quote_char * 3
-        lead = self.compute_generic_lead(env, next) + trail
-        if not next:
-            trail += ";"
-        return self.compose_generic_string(body, env, lead=lead, trail=trail)
+    def format(self, body):
+        """blacken the python"""
+        from black import format_str, FileMode
 
-    def doctest(self, token, options, env):
-        if self.docstring_block_string:
-            return
-
-    def shebang(self, token, options, env):
-        return "".join(self.yieldlines(token.map[1], env))
-
-    def code_block(self, token, options, env):
-        body = StringIO()
-        # set the default reference indent as soon as we can.
-        ref = env.setdefault("reference_indent", token.meta["first_indent"])
-
-        # add the prior block of markdown
-        print(self.generic(env, token), end="", file=body)
-        for line in self.yieldlines(token.map[1], env):
-            print(line[ref:], end="", file=body)
-
-        env.update(
-            colon_block=token.meta["colon_block"],
-            quoted_block=token.meta["quoted_block"],
-            last_indent=token.meta["last_indent"],
-        )
-        return body.getvalue()
-
-    def front_matter(self, token, options, env):
-        trail = self.quote_char * 3
-        lead = "locals().update(__import__('midgy').load_front_matter(" + trail
-        trail += "))"
-        body = "".join(self.yieldlines(token.map[1], env))
-        return self.compose_generic_string(body, env, lead=lead, trail=trail)
+        return format_str(body, mode=FileMode())
 
 
-def md_to_python(body, renderer_cls=Python, *, _renderers={}):
-    renderer = _renderers.get(renderer_cls)
-    if renderer is None:
-        renderer = _renderers[renderer_cls] = MarkdownIt(renderer_cls=renderer_cls)
-
-    return renderer.render(body)
+md_to_python = Python.code_from_string
