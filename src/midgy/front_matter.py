@@ -1,7 +1,49 @@
-
+from enum import Enum
 from re import compile
 
+__all__ = ("load",)
 SHEBANG = compile("^#!(?P<interpreter>\S+)\s+(?P<command>\S*)")
+
+
+FM = Enum("FM", {"yaml": "-", "toml": "+"})
+
+
+def strip_and_classifiy(x):
+    x = x.strip()
+    return FM(x[0]), "".join(x.splitlines(True)[1:-1])
+
+
+def load(x):
+    """load front matter including the delimiters.
+
+    --- and +++ reference yaml and toml front matter respectively."""
+    kind, x = strip_and_classifiy(x)
+    return {FM.toml: load_toml, FM.yaml: load_yaml}[kind](x)
+
+
+def load_toml(x):
+    from tomli import loads
+
+    return loads(x)
+
+
+def load_yaml(x):
+    return _get_yaml_loader()(x)
+
+
+def _get_yaml_loader():
+    loader = getattr(_get_yaml_loader, "loader", None)
+    if loader:
+        return loader
+    try:
+        from ruamel.yaml import safe_load as load
+    except ModuleNotFoundError:
+        try:
+            from yaml import safe_load as load
+        except ModuleNotFoundError:
+            from json import loads as load
+    _get_yaml_loader.loader = load
+    return load
 
 
 def _shebang_lexer(state, startLine, endLine, silent):
