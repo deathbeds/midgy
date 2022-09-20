@@ -19,11 +19,13 @@ SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
 class Python(DedentCodeBlock):
     """a line-for-line markdown to python translator"""
 
-    markdown_is_block_string: bool = True
-    docstring_block_string: bool = True
-    quote_char: str = chr(34)
-    include_doctest_input: bool = False
+    include_docstring: bool = True
+    include_doctest: bool = False
+    include_front_matter: bool = True
+    include_markdown: bool = True
+    
     front_matter_loader = '__import("midgy").front_matter.load'
+    quote_char = chr(34)
 
     def code_block(self, token, env):
         yield from super().code_block(token, env)
@@ -53,24 +55,27 @@ class Python(DedentCodeBlock):
             yield self.comment(self.get_block(env, token.meta["output"][1]), env)
 
     def fence_pycon(self, token, env):
-        if self.include_doctest_input:
+        if self.include_doctest:
             yield from self.doctest_code(token, env)
-        elif self.docstring_block_string and self.markdown_is_block_string:
+        elif self.include_docstring and self.include_markdown:
             return
         else:
             yield from self.doctest_comment(token, env)
 
     def front_matter(self, token, env):
-        trail = self.quote_char * 3
-        lead = f"locals().update({self.front_matter_loader}(" + trail
-        trail += "))"
-        body = self.get_block(env, token.map[1])
-        yield from self.wrap_lines(body, lead=lead, trail=trail)
+        if self.include_front_matter:
+            trail = self.quote_char * 3
+            lead = f"locals().update({self.front_matter_loader}(" + trail
+            trail += "))"
+            body = self.get_block(env, token.map[1])
+            yield from self.wrap_lines(body, lead=lead, trail=trail)
+        else:
+            yield self.comment(self.get_block(env, token.map[1]), env)
 
     def non_code(self, env, next=None):
         if env.get("quoted_block", False):
             yield from super().non_code(env, next)
-        elif self.markdown_is_block_string:
+        elif self.include_markdown:
             yield from self.non_code_block_string(env, next)
         else:
             yield from self.non_code_comment(env, next)
