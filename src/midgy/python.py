@@ -24,7 +24,7 @@ class Python(DedentCodeBlock):
     include_front_matter: bool = True
     include_markdown: bool = True
     
-    front_matter_loader = '__import("midgy").front_matter.load'
+    front_matter_loader = '__import__("midgy").front_matter.load'
     quote_char = chr(34)
 
     def code_block(self, token, env):
