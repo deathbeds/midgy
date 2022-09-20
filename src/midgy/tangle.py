@@ -3,15 +3,17 @@
 from dataclasses import dataclass, field
 from functools import partial
 from io import StringIO
+from pathlib import Path
 from re import compile
+from textwrap import dedent
 
-__all__ = "Tangle", "escape"
+__all__ = ()
 
 DOCTEST_CHAR, CONTINUATION_CHAR, COLON_CHAR, QUOTES_CHARS = 62, 92, 58, {39, 34}
 DOCTEST_CHARS = DOCTEST_CHAR, DOCTEST_CHAR, DOCTEST_CHAR
 ESCAPE = {x: "\\" + x for x in "'\""}
 ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
-
+ELLIPSIS_CHARS = (ord("."),) * 3
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
 
 
@@ -59,6 +61,11 @@ class Tangle:
         """tangle a string"""
         return cls(**kwargs).render(body)
 
+    def fence(self, token, env):
+        method = getattr(self, f"fence_{token.info}", None)
+        if method:
+            return method(token, env)
+
     def format(self, body):
         """a function that consumers can use to format their code"""
         return body
@@ -77,8 +84,11 @@ class Tangle:
     def parse(self, src):
         return self.parser.parse(src)
 
-    def parse_cells(self, body):
-        return self._walk_cells(self.parse(body))
+    def parse_cells(self, body, *, include_cell_hr=True):
+        yield from (
+            x[0]
+            for x in self._walk_cells(self.parse(body), include_cell_hr=include_cell_hr)
+        )
 
     def print(self, iter, io):
         return print(*iter, file=io, sep="", end="")
@@ -95,22 +105,32 @@ class Tangle:
         out = self.render_tokens(tokens, env)
         return self.format(out) if format else out
 
-    def render_cells(self, src):
+    def render_cells(self, src, *, include_cell_hr=True):
         tokens = self.parse(src)
         prior = self._init_env(src, tokens)
         prior_token = None
         source = prior.pop("source")
-        for block, next_token in self._walk_cells(tokens):
+        for block, next_token in self._walk_cells(
+            tokens, env=prior, include_cell_hr=include_cell_hr
+        ):
             env = self._init_env(src, block)
             env["source"], env["last_line"] = source, prior["last_line"]
             prior_token and block.insert(0, prior_token)
             yield self.render_tokens(block, env, next_token)
-            print(env)
             prior, prior_token = env, next_token
+
+    def render_lines(self, src):
+        return dedent(self.render("".join(src))).splitlines(True)
 
     def render_tokens(self, tokens, env=None, stop=None):
         """render parsed markdown tokens"""
         target = StringIO()
+        front_matter = self._get_front_matter(tokens)
+
+        if front_matter:
+            config = front_matter.get("*", None)
+            if config:
+                self = type(self)(**config)
 
         for generic, code in self._walk_code_blocks(tokens):
             # we walk pairs of tokens preceding code and the code token
@@ -130,8 +150,6 @@ class Tangle:
 
                 # update the rendering environment
                 env.update(
-                    colon_block=code.meta["colon_block"],
-                    quoted_block=code.meta["quoted_block"],
                     last_indent=code.meta["last_indent"],
                 )
 
@@ -168,14 +186,27 @@ class Tangle:
                     env["min_indent"] = token.meta["min_indent"]
         return env
 
-    def _walk_cells(self, tokens):
+    def _get_front_matter(self, tokens):
+        for token in tokens:
+            if token.type == "shebang":
+                continue
+            if token.type == "front_matter":
+                from .front_matter import load
+
+                return load(token.content)
+            return
+
+    def _walk_cells(self, tokens, *, env=None, include_cell_hr=True):
         block = []
         for token in tokens:
             if token.type == "hr":
                 if (len(token.markup) - token.markup.count(" ")) > self.cell_hr_length:
                     yield (list(block), token)
                     block.clear()
-                    block.append(token)
+                    if include_cell_hr:
+                        block.append(token)
+                    elif env is not None:
+                        list(self.get_block(env, token))
             else:
                 block.append(token)
         if block:
@@ -194,7 +225,21 @@ class Tangle:
     del MarkdownIt
 
 
+@dataclass
+class DedentCodeBlock(Tangle):
+    def code_block(self, token, env):
+        ref = env["min_indent"]
+        for line in self.get_block(env, token.map[1]):
+            right = line.lstrip()
+            if right:
+                yield line[ref:]
+                last = right
+            else:
+                yield line
+
+
 def _code_lexer(state, start, end, silent=False):
+    """a code lexer that tracks indents in the token and is aware of doctests"""
     if state.sCount[start] - state.blkIndent >= 4:
         first_indent, last_indent, next, last_line = 0, 0, start, start
         while next < end:
@@ -222,21 +267,11 @@ def _code_lexer(state, start, end, silent=False):
             if not state.isEmpty(i) and state.sCount[i]
         )
         meta = dict(
-            quoted_block=False,
-            colon_block=False,
             first_indent=first_indent,
             last_indent=last_indent,
             min_indent=min_indent,
         )
         end_pos = state.eMarks[last_line] - 1
-        if end_char == CONTINUATION_CHAR:
-            end_char = state.srcCharCode[end_pos]
-        if end_char == COLON_CHAR:
-            meta["colon_block"] = True
-        elif (end_char in QUOTES_CHARS) and end > 2:
-            meta["quoted_block"] = all(
-                map(end_char.__eq__, state.srcCharCode[end_pos - 2 : end_pos])
-            )
         token.meta.update(meta)
         return True
     return False
@@ -261,21 +296,36 @@ def _doctest_lexer(state, startLine, end, silent=False):
         return False
 
     if state.srcCharCode[start : start + 3] == DOCTEST_CHARS:
+        lead, extra, output, closed = startLine, startLine + 1, startLine + 1, False
         indent, next = state.sCount[startLine], startLine + 1
         while next < end:
             if state.isEmpty(next):
                 break
             if state.sCount[next] < indent:
                 break
-            begin = state.sCount[next]
+            begin = state.bMarks[next] + state.tShift[next]
             if state.srcCharCode[begin : begin + 3] == DOCTEST_CHARS:
                 break
-            next += 1
 
+            next += 1
+            if (not closed) and state.srcCharCode[begin : begin + 3] == ELLIPSIS_CHARS:
+                extra = next
+            else:
+                closed = True
+                output = next
         state.line = next
         token = state.push("fence", "code", 0)
         token.info = "pycon"
         token.content = state.getLines(startLine, next, 0, True)
         token.map = [startLine, state.line]
+        token.meta.update(
+            first_indent=indent,
+            last_indent=indent,
+            min_indent=indent,
+        )
+
+        token.meta.update(input=[lead, extra])
+        token.meta.update(output=[extra, output] if extra < output else None)
+
         return True
     return False

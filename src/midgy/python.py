@@ -1,12 +1,13 @@
 """a minimal conversion from markdown to python code based on indented code blocks"""
 
 from dataclasses import dataclass
+from pathlib import Path
 from textwrap import dedent, indent
 
-from .tangle import Tangle
+from .tangle import DedentCodeBlock
 
 __all__ = "Python", "md_to_python"
-SP = chr(32)
+SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
 
 # the Python class translates markdown to python with the minimum number
 # of modifications necessary to have valid python code. midgy will:
@@ -15,32 +16,49 @@ SP = chr(32)
 ## add indents to conform with python concepts
 # overall spaces, quotes, unicode escapes will be added to your markdown source.
 @dataclass
-class Python(Tangle):
+class Python(DedentCodeBlock):
     """a line-for-line markdown to python translator"""
 
     markdown_is_block_string: bool = True
     docstring_block_string: bool = True
     quote_char: str = chr(34)
+    include_doctest_input: bool = False
     front_matter_loader = '__import("midgy").front_matter.load'
 
     def code_block(self, token, env):
-        ref = env["min_indent"]
-        for line in self.get_block(env, token.map[1]):
-            right = line.lstrip()
-            yield line[ref:] if right else line
+        yield from super().code_block(token, env)
+        left = token.content.rstrip()
+        continued = left.endswith("\\")
+        left = continued and left.rstrip("\\") or left
+        env["colon_block"] = left.endswith(":")
+        env["quoted_block"] = left.endswith(QUOTES)
 
     def comment(self, body, env):
         return indent(dedent("".join(body)), SP * self._compute_indent(env) + "# ")
 
-    def doctest(self, token, env):
-        if self.docstring_block_string and self.markdown_is_block_string:
-            return
+    def doctest_comment(self, token, env):
         yield from self.non_code(env, token)
         yield (self.comment(self.get_block(env, token.map[1]), env),)
 
-    def fence(self, token, env):
-        if token.info == "pycon":
-            yield from self.doctest(token, env)
+    def doctest_code(self, token, env):
+        ref = env["min_indent"]
+        # yield self.non_code(env, token)
+        pre_len = 2
+        spaces = self._compute_indent(env)
+        yield from self.non_code(env, token)
+        for line in self.get_block(env, token.meta["input"][1]):
+            right = line.lstrip()
+            yield SP * spaces + right[4:]
+        if token.meta["output"]:
+            yield self.comment(self.get_block(env, token.meta["output"][1]), env)
+
+    def fence_pycon(self, token, env):
+        if self.include_doctest_input:
+            yield from self.doctest_code(token, env)
+        elif self.docstring_block_string and self.markdown_is_block_string:
+            return
+        else:
+            yield from self.doctest_comment(token, env)
 
     def front_matter(self, token, env):
         trail = self.quote_char * 3
