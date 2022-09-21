@@ -60,7 +60,7 @@ scripts = {run = "pytest"}
 addopts = "-pno:warnings -vv --cov=midgy --cov-report html:docs/coverage"
 
 [tool.coverage.run]
-omit = ["*/__*__.py", "*/_version.py"]
+omit = ["*/__*__.py", "*/_version.py", "site/*"]
 
 [tool.hatch.envs.docs]
 dependencies = ["mkdocs", "mkdocs-material", "ruamel.yaml"]
