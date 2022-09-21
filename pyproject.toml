@@ -27,7 +27,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
   "License :: OSI Approved :: BSD License",
 ]
-dependencies = ["markdown-it-py"] # no dependencies!
+dependencies = ["markdown-it-py"]
 dynamic = ["version"]
 
 [project.optional-dependencies]
@@ -49,9 +49,22 @@ source = "vcs"
 [tool.hatch.build.hooks.vcs]
 version-file = "src/midgy/_version.py"
 
-
-[tool.pytest.ini_options]
-addopts = "-pno:warnings --verbose --doctest-modules --current-env --sanitize-with sanitize.cfg"
-
 [tool.coverage.html]
 directory = "docs/coverage"
+
+[tool.hatch.envs.test]
+dependencies = ["pytest", "pytest-cov", "ruamel.yaml"]
+scripts = {run = "pytest"}
+
+[tool.pytest.ini_options]
+addopts = "-pno:warnings -vv --cov=midgy --cov-report html:docs/coverage"
+
+[tool.coverage.run]
+omit = ["*/__*__.py", "*/_version.py"]
+
+[tool.hatch.envs.docs]
+dependencies = ["mkdocs", "mkdocs-material", "ruamel.yaml"]
+
+[tool.hatch.envs.docs.scripts]
+build = "mkdocs build"
+serve = "mkdocs serve"
