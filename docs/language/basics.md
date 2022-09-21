@@ -1,14 +1,19 @@
-# markdown to python translations
+## basic markdown to python translations
 
-`midgy` transpiles markdown to python using a minimal set of heuristics.
-the sections below illustrate the translations from markdown to python.
+there are 3 flavors of literate programming available in `midgy`. 
+we can interleave non-code with code found as: 
+1. indented code blocks
+2. code fences with specific `info` content
+3. indented doctests when the `include_doctest` flag is enabled
 
 -------------------------------------------------------
 
-## basic markdown to python translations
+## tangling code with indented code blocks
 
-by default, `midgy` translates markdown content to python strings.
-
+the primary flavor of `midgy` literate programming uses indented code blocks.
+content in between indented code blocks is treated as python blocks strings.
+the samples below show some general interactions between non-code and indented code blocks.
+ 
 *******************************************************
 
 single markdown lines are single python strings
@@ -20,6 +25,8 @@ a single line line of markdown is a python string.
 ```python
 """a single line line of markdown is a python string.""";
 ```
+
+the semi-colon is appended to trailing block strings to suppress their output.
 
 *******************************************************
 
@@ -71,22 +78,6 @@ more than 4 indents are raw python code
 
 ```python
 print("hello world")
-```
-
-*******************************************************
-
-code fences are treated as noncode
-
-````markdown
-```python
-print("hello world")
-```
-````
-
-```python
-"""```python
-print("hello world")
-```""";
 ```
 
 -------------------------------------------------------
@@ -218,141 +209,3 @@ foo =\
 \
 """line continuations assign this string to `foo`""";
 ```
-
-
--------------------------------------------------------
-
-## front matter
-
-`midgy` permits `yaml` and `toml` front matter.
-
-*******************************************************
-
-triple + indicates toml front matter
-
-```markdown
-+++
-+++
-```
-
-```python
-locals().update(__import("midgy").front_matter.load("""+++
-+++"""))
-```
-
-*******************************************************
-
-triple - indicates yaml front matter
-    
-```markdown
----
----
-```
-
-```python
-locals().update(__import("midgy").front_matter.load("""---
----"""))
-```
-
-
-
-*******************************************************
-
-only shebang tokens can precede front matter
-
-```markdown
-#!/usr/bin/env midgy
----
----
-```
-
-```python
-#!/usr/bin/env midgy
-locals().update(__import("midgy").front_matter.load("""---
----"""))
-```
-
-*******************************************************
-
-non-shebang tokens cancel front matter
-
-```markdown
-a short paragraph
----
----
-```
-
-```python
-"""a short paragraph
----
----""";
-```
-*******************************************************
-
-exclude frotn matter from parsing
-
-```markdown
-+++
-["*"]
-include_front_matter = false
-+++
-```
-
-```python
-# +++
-# ["*"]
-# include_front_matter = false
-# +++
-```
-
-
--------------------------------------------------------
-
-## doctest
-
-*******************************************************
-
-by default doctests are not included in code.
-
-```markdown
->>> this is a blockquote
-... with a trailing paragraph
-and is not a doctest
-
-    >>> assert 'this is a doctest\
-    ... because it is indented'
-```
-
-```python
-""">>> this is a blockquote
-... with a trailing paragraph
-and is not a doctest
-
-    >>> assert 'this is a doctest\
-    ... because it is indented'""";
-```
-
-*******************************************************
-
-`include_doctest` flag includes doctest inputs in code
-
-```markdown
-+++
-["*"]
-include_doctest = true
-include_front_matter = false
-+++
-
-    >>> print("a doctest")
-```
-
-```python
-# +++
-# ["*"]
-# include_doctest = true
-# include_front_matter = false
-# +++
-
-print("a doctest")
-```
-
