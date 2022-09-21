@@ -110,8 +110,8 @@ class Python(DedentCodeBlock):
     def non_code_comment(self, env, next=None):
         yield self.comment(super().non_code(env, next), env)
 
-    def render_tokens(self, tokens, env=None, stop=None):
-        return dedent(super().render_tokens(tokens, env, stop))
+    def render_tokens(self, tokens, env=None, stop=None, src=None):
+        return dedent(super().render_tokens(tokens, env=env, stop=stop, src=src))
 
     def shebang(self, token, env):
         yield "".join(self.get_block(env, token.map[1]))

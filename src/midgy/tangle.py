@@ -106,7 +106,7 @@ class Tangle:
 
     def render(self, src, format=False):
         tokens = self.parse(src)
-        out = self.render_tokens(src, tokens)
+        out = self.render_tokens(tokens, src=src)
         return self.format(out) if format else out
 
     def render_cells(self, src, *, include_cell_hr=True):
@@ -120,13 +120,13 @@ class Tangle:
             env = self._init_env(src, block)
             env["source"], env["last_line"] = source, prior["last_line"]
             prior_token and block.insert(0, prior_token)
-            yield self.render_tokens(block, env, next_token)
+            yield self.render_tokens(block, env=env, stop=next_token)
             prior, prior_token = env, next_token
 
     def render_lines(self, src):
         return dedent(self.render("".join(src))).splitlines(True)
 
-    def render_tokens(self, src, tokens, env=None, stop=None):
+    def render_tokens(self, tokens, env=None, src=None, stop=None):
         """render parsed markdown tokens"""
         target = StringIO()
         front_matter = self._get_front_matter(tokens)
@@ -136,7 +136,8 @@ class Tangle:
             if config:
                 self = type(self)(**config)
 
-        env = self._init_env(src, tokens)
+        if env is None:
+            env = self._init_env(src, tokens)
 
         for generic, code in self._walk_code_blocks(tokens):
             # we walk pairs of tokens preceding code and the code token
