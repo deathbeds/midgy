@@ -106,8 +106,7 @@ class Tangle:
 
     def render(self, src, format=False):
         tokens = self.parse(src)
-        env = self._init_env(src, tokens)
-        out = self.render_tokens(tokens, env)
+        out = self.render_tokens(src, tokens)
         return self.format(out) if format else out
 
     def render_cells(self, src, *, include_cell_hr=True):
@@ -127,7 +126,7 @@ class Tangle:
     def render_lines(self, src):
         return dedent(self.render("".join(src))).splitlines(True)
 
-    def render_tokens(self, tokens, env=None, stop=None):
+    def render_tokens(self, src, tokens, env=None, stop=None):
         """render parsed markdown tokens"""
         target = StringIO()
         front_matter = self._get_front_matter(tokens)
@@ -136,6 +135,8 @@ class Tangle:
             config = front_matter.get(self.config_key, None)
             if config:
                 self = type(self)(**config)
+
+        env = self._init_env(src, tokens)
 
         for generic, code in self._walk_code_blocks(tokens):
             # we walk pairs of tokens preceding code and the code token
@@ -194,13 +195,16 @@ class Tangle:
 
     def _init_env(self, src, tokens):
         env = dict(source=StringIO(src), last_line=0, min_indent=None, last_indent=0)
+        include_doctest = getattr(self, "include_doctest", False)
+        print(include_doctest)
         for token in tokens:
             doctest = False
             if token.type == "fence":
                 if token.info in self.explicit_code_fence:
                     env["min_indent"] = 0
                     continue
-                doctest = token.info == "pycon"
+                if include_doctest:
+                    doctest = token.info == "pycon"
             if doctest or (token.type == "code_block"):
                 if env["min_indent"] is None:
                     env["min_indent"] = token.meta["min_indent"]
