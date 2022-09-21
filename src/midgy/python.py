@@ -1,10 +1,10 @@
 """a minimal conversion from markdown to python code based on indented code blocks"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from textwrap import dedent, indent
 
-from .tangle import DedentCodeBlock
+from .tangle import DedentCodeBlock, escape
 
 __all__ = "Python", "md_to_python"
 SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
@@ -23,7 +23,8 @@ class Python(DedentCodeBlock):
     include_doctest: bool = False
     include_front_matter: bool = True
     include_markdown: bool = True
-    
+    explicit_code_fence: set = field(default_factory={"python", "python3", "py"}.copy)
+
     front_matter_loader = '__import__("midgy").front_matter.load'
     quote_char = chr(34)
 
@@ -31,9 +32,19 @@ class Python(DedentCodeBlock):
         yield from super().code_block(token, env)
         left = token.content.rstrip()
         continued = left.endswith("\\")
-        left = continued and left.rstrip("\\") or left
-        env["colon_block"] = left.endswith(":")
-        env["quoted_block"] = left.endswith(QUOTES)
+        if continued:
+            left = left[:-1]
+        env.update(
+            colon_block=left.endswith(":"),
+            quoted_block=left.endswith(QUOTES),
+            continued=continued,
+        )
+
+    def code_fence_block(self, token, env):
+        yield self.comment(self.get_block(env, token.map[0] + 1), env)
+        yield from self.get_block(env, token.map[1] - 1)
+        yield self.comment(self.get_block(env, token.map[1]), env)
+        env.update(colon_block=False, quoted_block=False, continued=False)
 
     def comment(self, body, env):
         return indent(dedent("".join(body)), SP * self._compute_indent(env) + "# ")
@@ -62,6 +73,12 @@ class Python(DedentCodeBlock):
         else:
             yield from self.doctest_comment(token, env)
 
+    def format(self, body):
+        """blacken the python"""
+        from black import format_str, FileMode
+
+        return format_str(body, mode=FileMode())
+
     def front_matter(self, token, env):
         if self.include_front_matter:
             trail = self.quote_char * 3
@@ -85,10 +102,18 @@ class Python(DedentCodeBlock):
         trail = self.quote_char * 3
         lead = SP * self._compute_indent(env) + trail
         trail += "" if next else ";"
-        yield from self.wrap_lines(body, lead=lead, trail=trail)
+        yield from self.wrap_lines(
+            map(escape, body),
+            lead=lead,
+            trail=trail,
+            continuation=env.get("continued") and "\\" or "",
+        )
 
     def non_code_comment(self, env, next=None):
         yield self.comment(super().non_code(env, next), env)
+
+    def render_tokens(self, tokens, env=None, stop=None):
+        return dedent(super().render_tokens(tokens, env, stop))
 
     def shebang(self, token, env):
         yield "".join(self.get_block(env, token.map[1]))
@@ -104,12 +129,6 @@ class Python(DedentCodeBlock):
             else:
                 spaces += 4  # add post colon default spaces.
         return spaces - env.get("min_indent", 0)
-
-    def format(self, body):
-        """blacken the python"""
-        from black import format_str, FileMode
-
-        return format_str(body, mode=FileMode())
 
 
 md_to_python = Python.code_from_string

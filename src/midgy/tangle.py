@@ -34,6 +34,7 @@ class Tangle:
 
     parser: object = field(default_factory=MarkdownIt)
     cell_hr_length: int = 9
+    explicit_code_fence: set = field(default_factory=set)
 
     def __post_init__(self):
         from .front_matter import (
@@ -55,12 +56,16 @@ class Tangle:
     def code_block(self, token, env):
         yield from self.get_block(env, token.map[1])
 
+    code_fence_block = code_block
+
     @classmethod
     def code_from_string(cls, body, **kwargs):
         """tangle a string"""
         return cls(**kwargs).render(body)
 
     def fence(self, token, env):
+        if token.info in self.explicit_code_fence:
+            return self.code_fence_block(token, env)
         method = getattr(self, f"fence_{token.info}", None)
         if method:
             return method(token, env)
@@ -160,7 +165,7 @@ class Tangle:
 
         return target.getvalue()  # return the value of the target, a format string.
 
-    def wrap_lines(self, lines, lead="", pre="", trail=""):
+    def wrap_lines(self, lines, lead="", pre="", trail="", continuation=""):
         """a utility function to manipulate a buffer of content line-by-line."""
         ws, any, continued = "", False, False
         for line in lines:
@@ -168,7 +173,12 @@ class Tangle:
             if LL:
                 continued = line[LL - 1] == "\\"
                 LL -= continued
-                yield from (ws, lead, line[:LL])
+                if any:
+                    yield ws
+                else:
+                    for i, l in enumerate(StringIO(ws)):
+                        yield l[:-1] + continuation + l[-1]
+                yield from (lead, line[:LL])
                 any, ws = True, line[LL:]
                 lead = ""
             else:
@@ -182,13 +192,18 @@ class Tangle:
             yield ws
 
     def _init_env(self, src, tokens):
-        env = dict(source=StringIO(src), last_line=0, min_indent=0, last_indent=0)
+        env = dict(source=StringIO(src), last_line=0, min_indent=None, last_indent=0)
         for token in tokens:
             if token.type == "code_block":
-                if env["min_indent"]:
-                    env["min_indent"] = min(env["min_indent"], token.meta["min_indent"])
-                else:
+                if env["min_indent"] is None:
                     env["min_indent"] = token.meta["min_indent"]
+                else:
+                    env["min_indent"] = min(env["min_indent"], token.meta["min_indent"])
+            if token.type == "fence":
+                if token.info in self.explicit_code_fence:
+                    env["min_indent"] = 0
+        if env["min_indent"] is None:
+            env["min_indent"] = 0
         return env
 
     def _get_front_matter(self, tokens):
@@ -261,14 +276,13 @@ def _code_lexer(state, start, end, silent=False):
                 next += 1
             else:
                 break
-        state.line = next
+        state.line = last_line + 1
         token = state.push("code_block", "code", 0)
-        token.content = state.getLines(start, next, 4 + state.blkIndent, True)
+        token.content = state.getLines(start, state.line, 4 + state.blkIndent, True)
         token.map = [start, state.line]
-        end_char = state.srcCharCode[state.eMarks[last_line] - 1]
         min_indent = min(
             state.sCount[i]
-            for i in range(start, next)
+            for i in range(start, state.line)
             if not state.isEmpty(i) and state.sCount[i]
         )
         meta = dict(
@@ -276,7 +290,6 @@ def _code_lexer(state, start, end, silent=False):
             last_indent=last_indent,
             min_indent=min_indent,
         )
-        end_pos = state.eMarks[last_line] - 1
         token.meta.update(meta)
         return True
     return False
