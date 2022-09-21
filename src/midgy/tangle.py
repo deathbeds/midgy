@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from functools import partial
 from io import StringIO
-from pathlib import Path
 from re import compile
 from textwrap import dedent
 
@@ -163,10 +162,12 @@ class Tangle:
 
     def wrap_lines(self, lines, lead="", pre="", trail=""):
         """a utility function to manipulate a buffer of content line-by-line."""
-        ws, any = "", False
+        ws, any, continued = "", False, False
         for line in lines:
             LL = len(line.rstrip())
             if LL:
+                continued = line[LL - 1] == "\\"
+                LL -= continued
                 yield from (ws, lead, line[:LL])
                 any, ws = True, line[LL:]
                 lead = ""
@@ -174,7 +175,11 @@ class Tangle:
                 ws += line
         if any:
             yield trail
-        yield ws
+        if continued:
+            for i, line in enumerate(StringIO(ws)):
+                yield from (lead, line[:-1], i and "\\" or "", line[-1])
+        else:
+            yield ws
 
     def _init_env(self, src, tokens):
         env = dict(source=StringIO(src), last_line=0, min_indent=0, last_indent=0)
