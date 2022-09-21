@@ -55,15 +55,13 @@ class Python(DedentCodeBlock):
 
     def doctest_code(self, token, env):
         ref = env["min_indent"]
-        # yield self.non_code(env, token)
-        pre_len = 2
-        spaces = self._compute_indent(env)
         yield from self.non_code(env, token)
         for line in self.get_block(env, token.meta["input"][1]):
             right = line.lstrip()
-            yield SP * spaces + right[4:]
+            yield line[ref : len(line) - len(right)] + right[4:]
         if token.meta["output"]:
             yield self.comment(self.get_block(env, token.meta["output"][1]), env)
+        env.update(colon_block=False, quoted_block=False, continued=False)
 
     def fence_pycon(self, token, env):
         if self.include_doctest:

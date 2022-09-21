@@ -9,10 +9,10 @@ from textwrap import dedent
 __all__ = ()
 
 DOCTEST_CHAR, CONTINUATION_CHAR, COLON_CHAR, QUOTES_CHARS = 62, 92, 58, {39, 34}
-DOCTEST_CHARS = DOCTEST_CHAR, DOCTEST_CHAR, DOCTEST_CHAR
+DOCTEST_CHARS = DOCTEST_CHAR, DOCTEST_CHAR, DOCTEST_CHAR, 32
 ESCAPE = {x: "\\" + x for x in "'\""}
 ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
-ELLIPSIS_CHARS = (ord("."),) * 3
+ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
 
 
@@ -35,6 +35,7 @@ class Tangle:
     parser: object = field(default_factory=MarkdownIt)
     cell_hr_length: int = 9
     explicit_code_fence: set = field(default_factory=set)
+    config_key: str = "*"
 
     def __post_init__(self):
         from .front_matter import (
@@ -132,7 +133,7 @@ class Tangle:
         front_matter = self._get_front_matter(tokens)
 
         if front_matter:
-            config = front_matter.get("*", None)
+            config = front_matter.get(self.config_key, None)
             if config:
                 self = type(self)(**config)
 
@@ -194,14 +195,18 @@ class Tangle:
     def _init_env(self, src, tokens):
         env = dict(source=StringIO(src), last_line=0, min_indent=None, last_indent=0)
         for token in tokens:
-            if token.type == "code_block":
+            doctest = False
+            if token.type == "fence":
+                if token.info in self.explicit_code_fence:
+                    env["min_indent"] = 0
+                    continue
+                doctest = token.info == "pycon"
+            if doctest or (token.type == "code_block"):
                 if env["min_indent"] is None:
                     env["min_indent"] = token.meta["min_indent"]
                 else:
                     env["min_indent"] = min(env["min_indent"], token.meta["min_indent"])
-            if token.type == "fence":
-                if token.info in self.explicit_code_fence:
-                    env["min_indent"] = 0
+
         if env["min_indent"] is None:
             env["min_indent"] = 0
         return env
@@ -268,7 +273,7 @@ def _code_lexer(state, start, end, silent=False):
                 continue
             if state.sCount[next] - state.blkIndent >= 4:
                 begin = state.bMarks[next] + state.tShift[next]
-                if state.srcCharCode[begin : begin + 3] == DOCTEST_CHARS:
+                if state.srcCharCode[begin : begin + 4] == DOCTEST_CHARS:
                     break
                 if not first_indent:
                     first_indent = state.sCount[next]
@@ -313,7 +318,7 @@ def _doctest_lexer(state, startLine, end, silent=False):
     if (start - state.blkIndent) < 4:
         return False
 
-    if state.srcCharCode[start : start + 3] == DOCTEST_CHARS:
+    if state.srcCharCode[start : start + 4] == DOCTEST_CHARS:
         lead, extra, output, closed = startLine, startLine + 1, startLine + 1, False
         indent, next = state.sCount[startLine], startLine + 1
         while next < end:
@@ -322,11 +327,11 @@ def _doctest_lexer(state, startLine, end, silent=False):
             if state.sCount[next] < indent:
                 break
             begin = state.bMarks[next] + state.tShift[next]
-            if state.srcCharCode[begin : begin + 3] == DOCTEST_CHARS:
+            if state.srcCharCode[begin : begin + 4] == DOCTEST_CHARS:
                 break
 
             next += 1
-            if (not closed) and state.srcCharCode[begin : begin + 3] == ELLIPSIS_CHARS:
+            if (not closed) and state.srcCharCode[begin : begin + 4] == ELLIPSIS_CHARS:
                 extra = next
             else:
                 closed = True
