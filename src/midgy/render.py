@@ -1,4 +1,4 @@
-"""tangle builds the machinery to translate markdown documents to code."""
+"""render builds the machinery to translate markdown documents to code."""
 
 from dataclasses import dataclass, field
 from functools import partial
@@ -16,12 +16,12 @@ ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
 
 
-# the Tangle is special markdown renderer designed to produce
+# the Renderer is special markdown renderer designed to produce
 # line for line transformations of markdown to the converted code.
 # not all languages require this, but for python it matters.
 @dataclass
-class Tangle:
-    """tangle markdown to code.
+class Renderer:
+    """the base render system for markdown to code.
 
     * tokenize & render markdown as code
     * line-for-line rendering
@@ -61,7 +61,7 @@ class Tangle:
 
     @classmethod
     def code_from_string(cls, body, **kwargs):
-        """tangle a string"""
+        """render a string"""
         return cls(**kwargs).render(body)
 
     def fence(self, token, env):
@@ -175,7 +175,7 @@ class Tangle:
             LL = len(line.rstrip())
             if LL:
                 continued = line[LL - 1] == "\\"
-                LL -= continued
+                LL -= 1 * continued
                 if any:
                     yield ws
                 else:
@@ -197,7 +197,6 @@ class Tangle:
     def _init_env(self, src, tokens):
         env = dict(source=StringIO(src), last_line=0, min_indent=None, last_indent=0)
         include_doctest = getattr(self, "include_doctest", False)
-        print(include_doctest)
         for token in tokens:
             doctest = False
             if token.type == "fence":
@@ -256,7 +255,7 @@ class Tangle:
 
 
 @dataclass
-class DedentCodeBlock(Tangle):
+class DedentCodeBlock(Renderer):
     def code_block(self, token, env):
         ref = env["min_indent"]
         for line in self.get_block(env, token.map[1]):
