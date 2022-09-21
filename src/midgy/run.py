@@ -1,17 +1,23 @@
 """run and import markdown files as python"""
-from importlib import import_module
-
+from pathlib import Path
+from sys import path
 from importnb import Notebook
 
-from .py import Python
+from .python import Python
 
 
-__all__ = "Markdown",
+__all__ = ("Markdown", "run")
+
+
 class Markdown(Notebook):
-    """an importnb extension for pidgy documents"""
+    """an importnb extension for markdown documents"""
 
     extensions = ".py.md", ".md", ".md.ipynb"
-    tangle = Python()
+    render_cls = Python
+
+    def __init__(self, fullname=None, path=None, include_doctest=False, **kwargs):
+        super().__init__(fullname, path, **kwargs)
+        self.render = self.render_cls(include_doctest=include_doctest)
 
     def get_data(self, path):
         if self.path.endswith(".md"):
@@ -20,51 +26,34 @@ class Markdown(Notebook):
         return super(Notebook, self).get_data(path)
 
     def code(self, str):
-        return super().code(self.tangle.render("".join(str)))
+        return super().code(self.render.render("".join(str)))
 
     get_source = get_data
 
 
-def run_file(file, main=True):
-    """run a markdown file as a python module"""
-    return Markdown.load(file, main=main)
-
-
-def run_mod(mod, main=True):
-    """run a module that may be a markdown file."""
-    with Markdown():
-        m = import_module(mod)
-    return m
-
-
-def run_code(code, main=True):
-    """run markdown as python code"""
-    return eval(Python.code_from_string(code))
-
-
-def runmd(file=None, module=None, code=None, args=None):
-    """run md files, modules, code"""
-    import sys
-
-    old = sys.argv
-    if args:
-        sys.argv = [__name__] + list(args)
-
-    try:
-        for f in file or ():
-            run_file(f)
-
-        for m in module or ():
-            run_mod(f)
-
-        for c in code or ():
-            run_code(c)
-    finally:
-        sys.argv = old
+def run(file=None, module=None, code=None, dir=None, **kwargs):
+    if file is module is code is None:
+        from sys import argv
+        from .__main__ import run as parser
+        ns, _ = vars(parser.parse_known_args(argv[1:]))
+        module, file, code = (
+            ns.pop("module", None),
+            ns.pop("file", None),
+            ns.pop("code", None),
+        )
+        ns.pop("func", None)
+        kwargs.update(ns)
+    if "" not in path:
+        path.insert(0, dir or "")
+    if file:
+        return Markdown.load_file(file, **kwargs)
+    if module:
+        return Markdown.load_module_as_main(file, **kwargs)
+    if code:
+        return eval(Python.code_from_string(code))
 
 
 if __name__ == "__main__":
-    from .__main__ import main, run_parser
+    from . import __main__
 
-    run_parser.set_defaults(func=runmd)
-    main(run_parser)
+    run()
