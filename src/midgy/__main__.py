@@ -1,32 +1,23 @@
-from ast import arg
 from pathlib import Path
-from sys import stderr, stdout
 from argparse import ArgumentParser
+from .run import Markdown
 
 parser = ArgumentParser("midgy", description="run markdown files")
-sub = parser.add_subparsers()
+sub = parser.add_subparsers(dest="subparser")
 run = sub.add_parser("run")
-run.add_argument("-m", "--module", help="python path.")
-run.add_argument("-c", "--code", help="raw code.")
+run = Markdown.get_argparser(run)
 run.add_argument(
-    "file", nargs="?", type=Path, help="input file or globs to execute."
-)
-run.add_argument(
-    "-d",
+    "-t",
     "--doctest-is-code",
     action="store_true",
     help="include doctest input in code generation.",
     dest="include_doctest",
 )
-from .run import run as run_method
-
-run.set_defaults(func=run_method)
 convert = sub.add_parser("convert")
 
 subs = {"run", "convert"}
 try:
     # set up rich
-    import importnb
     from rich import print
     from rich.traceback import install
 
@@ -37,11 +28,20 @@ except ModuleNotFoundError:
 
 def main(parser=parser):
     from sys import argv
-    if argv[1] not in subs:
-        argv.insert(1, "run")
-    ns, _ = parser.parse_known_args(argv[1:])
-    kw = vars(ns)
-    kw.pop("func", run_method)(**kw)
+
+    argv = argv[1:]
+    if argv[0] not in subs:
+        argv.insert(0, "run")
+
+    ns, _ = parser.parse_known_args(argv)
+    ns = vars(ns)
+
+    subparser = ns.pop("subparser")
+    if subparser in {None, "run"}:
+        from .run import Markdown
+
+        Markdown.load_argv(argv[1:])
+        return
 
 
 if __name__ == "__main__":
