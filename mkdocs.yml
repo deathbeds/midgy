@@ -1,3 +1,37 @@
 site_name: midgy literate programming
+site_description: midgy literate programming
+site_url: https://deathbeds.github.io/midgy
+repo_url: https://deathbeds.github.io/midgy
+repo_name: deathbeds/midgy
+site_dir: site
+
 theme:
   name: material
+
+plugins:
+  - search
+
+nav:
+  - the midgy library: midgy.md
+  - midgy literate programming:
+      - markdown python metalanguage: README.md
+      - markdown tokenization: tokenization.md
+      - python rendering: rendering.md
+  - the language:
+      - about the language: language/README.md
+      - midgy basics: language/basics.md
+      - code fences: language/code_fences.md
+      - doctests: language/doctest.md
+      - front matter: language/front_matter.md
+      - line continuations: language/line_continuations.md
+      - rendering flags: language/flags.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.emoji
+  - pymdownx.magiclink
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.superfences
+  - toc:
+      permalink: "¤"
