@@ -32,12 +32,13 @@ class Renderer:
 
     from markdown_it import MarkdownIt
 
-    parser: object = field(default_factory=MarkdownIt)
+    parser: object = field(default_factory=partial(MarkdownIt, "gfm-like"))
     cell_hr_length: int = 9
     explicit_code_fence: set = field(default_factory=set)
     config_key: str = "*"
 
     def __post_init__(self):
+        from mdit_py_plugins import footnote, deflist
         from .front_matter import (
             _front_matter_lexer,
             _shebang_lexer,
@@ -53,6 +54,7 @@ class Renderer:
         self.parser.block.ruler.after("doctest", "code", _code_lexer)
         self.parser.block.ruler.before("table", "shebang", _shebang_lexer)
         self.parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
+        self.parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
 
     def code_block(self, token, env):
         yield from self.get_block(env, token.map[1])
