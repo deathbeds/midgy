@@ -27,7 +27,10 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
   "License :: OSI Approved :: BSD License",
 ]
-dependencies = ["markdown-it-py"]
+dependencies = [
+  "markdown-it-py[plugins,linkify]",
+  "importnb@file:///home/tbone/Documents/importnb",
+]
 dynamic = ["version"]
 
 [project.optional-dependencies]
@@ -46,6 +49,9 @@ Source = "https://github.com/deathbeds/midgy"
 [tool.hatch.version]
 source = "vcs"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.hooks.vcs]
 version-file = "src/midgy/_version.py"
 
@@ -54,10 +60,10 @@ directory = "docs/coverage"
 
 [tool.hatch.envs.test]
 dependencies = ["pytest", "pytest-cov", "ruamel.yaml"]
-scripts = {run = "pytest"}
+scripts = { run = "pytest" }
 
 [tool.pytest.ini_options]
-addopts = "-pno:warnings -vv --cov=midgy --cov-report html:docs/coverage"
+addopts = "-pno:warnings -vv --cov=midgy --cov-report html:docs/coverage --ignore site"
 
 [tool.coverage.run]
 omit = ["*/__*__.py", "*/_version.py", "site/*"]

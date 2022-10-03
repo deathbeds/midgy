@@ -34,8 +34,9 @@ class Renderer:
 
     parser: object = field(default_factory=partial(MarkdownIt, "gfm-like"))
     cell_hr_length: int = 9
-    explicit_code_fence: set = field(default_factory=set)
-    config_key: str = "*"
+    include_code_fences: set = field(default_factory=set)
+    include_indented_code: bool = True
+    config_key: str = "py"
 
     def __post_init__(self):
         from mdit_py_plugins import footnote, deflist
@@ -57,7 +58,8 @@ class Renderer:
         self.parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
 
     def code_block(self, token, env):
-        yield from self.get_block(env, token.map[1])
+        if self.include_indented_code:
+            yield from self.get_block(env, token.map[1])
 
     code_fence_block = code_block
 
@@ -67,7 +69,7 @@ class Renderer:
         return cls(**kwargs).render(body)
 
     def fence(self, token, env):
-        if token.info in self.explicit_code_fence:
+        if token.info in self.include_code_fences:
             return self.code_fence_block(token, env)
         method = getattr(self, f"fence_{token.info}", None)
         if method:
@@ -94,7 +96,7 @@ class Renderer:
     def parse_cells(self, body, *, include_cell_hr=True):
         yield from (
             x[0]
-            for x in self._walk_cells(self.parse(body), include_cell_hr=include_cell_hr)
+            for x in self.walk_cells(self.parse(body), include_cell_hr=include_cell_hr)
         )
 
     def print(self, iter, io):
@@ -113,10 +115,11 @@ class Renderer:
 
     def render_cells(self, src, *, include_cell_hr=True):
         tokens = self.parse(src)
+        self = self.renderer_from_tokens(tokens)        
         prior = self._init_env(src, tokens)
         prior_token = None
         source = prior.pop("source")
-        for block, next_token in self._walk_cells(
+        for block, next_token in self.walk_cells(
             tokens, env=prior, include_cell_hr=include_cell_hr
         ):
             env = self._init_env(src, block)
@@ -128,16 +131,18 @@ class Renderer:
     def render_lines(self, src):
         return dedent(self.render("".join(src))).splitlines(True)
 
-    def render_tokens(self, tokens, env=None, src=None, stop=None):
-        """render parsed markdown tokens"""
-        target = StringIO()
+    def renderer_from_tokens(self, tokens):
         front_matter = self._get_front_matter(tokens)
-
         if front_matter:
             config = front_matter.get(self.config_key, None)
             if config:
-                self = type(self)(**config)
+                return type(self)(**config)
+        return self
 
+    def render_tokens(self, tokens, env=None, src=None, stop=None):
+        """render parsed markdown tokens"""
+        target = StringIO()
+        self = self.renderer_from_tokens(tokens)
         if env is None:
             env = self._init_env(src, tokens)
 
@@ -202,7 +207,7 @@ class Renderer:
         for token in tokens:
             doctest = False
             if token.type == "fence":
-                if token.info in self.explicit_code_fence:
+                if token.info in self.include_code_fences:
                     env["min_indent"] = 0
                     continue
                 if include_doctest:
@@ -227,7 +232,7 @@ class Renderer:
                 return load(token.content)
             return
 
-    def _walk_cells(self, tokens, *, env=None, include_cell_hr=True):
+    def walk_cells(self, tokens, *, env=None, include_cell_hr=True):
         block = []
         for token in tokens:
             if token.type == "hr":
