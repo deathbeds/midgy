@@ -75,7 +75,7 @@ class Python(DedentCodeBlock):
 
     def format(self, body):
         """blacken the python"""
-        from black import format_str, FileMode
+        from black import FileMode, format_str
 
         return format_str(body, mode=FileMode())
 
@@ -106,10 +106,7 @@ class Python(DedentCodeBlock):
             map(escape, body),
             lead=lead,
             trail=trail,
-            continuation=self.extend_continuations
-            and env.get("continued")
-            and "\\"
-            or "",
+            continuation=self.extend_continuations and env.get("continued") and "\\" or "",
         )
 
     def non_code_comment(self, env, next=None):

@@ -1,4 +1,6 @@
+.doit.db*
 src/midgy/_version.py
+settings.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

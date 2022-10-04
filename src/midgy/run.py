@@ -1,9 +1,9 @@
 """run and import markdown files as python"""
 from dataclasses import dataclass
+
 from importnb import Notebook
 
 from .python import Python
-
 
 __all__ = ("Markdown", "run")
 

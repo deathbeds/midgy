@@ -39,11 +39,9 @@ class Renderer:
     config_key: str = "py"
 
     def __post_init__(self):
-        from mdit_py_plugins import footnote, deflist
-        from .front_matter import (
-            _front_matter_lexer,
-            _shebang_lexer,
-        )
+        from mdit_py_plugins import deflist, footnote
+
+        from .front_matter import _front_matter_lexer, _shebang_lexer
 
         # our tangling system adds extra conventions to commonmark:
         ## extend indented code to recognize doctest syntax in-line
@@ -95,8 +93,7 @@ class Renderer:
 
     def parse_cells(self, body, *, include_cell_hr=True):
         yield from (
-            x[0]
-            for x in self.walk_cells(self.parse(body), include_cell_hr=include_cell_hr)
+            x[0] for x in self.walk_cells(self.parse(body), include_cell_hr=include_cell_hr)
         )
 
     def print(self, iter, io):
@@ -115,7 +112,7 @@ class Renderer:
 
     def render_cells(self, src, *, include_cell_hr=True):
         tokens = self.parse(src)
-        self = self.renderer_from_tokens(tokens)        
+        self = self.renderer_from_tokens(tokens)
         prior = self._init_env(src, tokens)
         prior_token = None
         source = prior.pop("source")

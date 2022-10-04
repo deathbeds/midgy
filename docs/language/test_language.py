@@ -1,10 +1,13 @@
 from pathlib import Path
+
 from pytest import mark
+
 import midgy
 
 HERE = Path(__file__).parent
 
-import midgy.render, midgy.python
+import midgy.python
+import midgy.render
 
 
 def gen_tests():
@@ -35,6 +38,7 @@ def gen_tests():
             if name:
                 yield (file.stem, name), (i, o, parser)
 
+
 def get_description(tokens):
     for token in tokens:
         if token.type == "paragraph_open":
@@ -45,7 +49,6 @@ def get_description(tokens):
         elif token.type == "paragraph_close":
             return desc
         break
-
 
 
 cases = dict(gen_tests())
