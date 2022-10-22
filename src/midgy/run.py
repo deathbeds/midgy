@@ -1,5 +1,5 @@
 """run and import markdown files as python"""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from importnb import Notebook
 
@@ -13,7 +13,7 @@ class Markdown(Notebook):
     """an importnb extension for markdown documents"""
 
     include_doctest: bool = False
-    extensions = ".py.md", ".md", ".md.ipynb"
+    extensions: tuple = field(default_factory=[".md", ".py.md", ".md.ipynb", ].copy)
     render_cls = Python
 
     def __post_init__(self):

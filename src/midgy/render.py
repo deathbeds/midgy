@@ -32,7 +32,11 @@ class Renderer:
 
     from markdown_it import MarkdownIt
 
-    parser: object = field(default_factory=partial(MarkdownIt, "gfm-like"))
+    parser: object = field(
+        default_factory=partial(
+            MarkdownIt, "gfm-like", options_update=dict(inline_definitions=True, langPrefix="")
+        )
+    )
     cell_hr_length: int = 9
     include_code_fences: set = field(default_factory=set)
     include_indented_code: bool = True
@@ -54,6 +58,7 @@ class Renderer:
         self.parser.block.ruler.before("table", "shebang", _shebang_lexer)
         self.parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
         self.parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
+        self.parser.disable("footnote_tail")
 
     def code_block(self, token, env):
         if self.include_indented_code:
