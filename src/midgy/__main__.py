@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from pathlib import Path
 
-from .run import Markdown
+from .loader import Markdown
 
 parser = ArgumentParser("midgy", description="run markdown files")
 sub = parser.add_subparsers(dest="subparser")
