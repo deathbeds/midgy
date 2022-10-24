@@ -12,12 +12,14 @@ plugins:
   - search
 
 nav:
-  - the midgy library: midgy.md
-  - midgy literate programming:
-      - markdown python metalanguage: README.md
-      - markdown tokenization: tokenization.md
-      - python rendering: rendering.md
-  - the language:
+  -   literate programming:
+      - midgy literate programming: README.md
+  - the midgy library: 
+      - midgy usage: midgy.md
+      - translation:
+        - markdown tokenization: tokenization.md
+        - python rendering: rendering.md
+  - the midgy language:
       - about the language: language/README.md
       - midgy basics: language/basics.md
       - code fences: language/code_fences.md
@@ -25,13 +27,19 @@ nav:
       - front matter: language/front_matter.md
       - line continuations: language/line_continuations.md
       - rendering flags: language/flags.md
+  - the midgy design: design.md
 
 markdown_extensions:
   - admonition
   - pymdownx.emoji
   - pymdownx.magiclink
+  - footnotes
   - pymdownx.snippets:
       check_paths: true
   - pymdownx.superfences
   - toc:
       permalink: "¤"
+  - attr_list
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg

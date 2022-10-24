@@ -24,22 +24,23 @@ class Python(DedentCodeBlock):
     include_front_matter: bool = True
     include_markdown: bool = True
     extend_continuations: bool = True
-    explicit_code_fence: set = field(default_factory={"python"}.copy)
+    include_code_fences: list = field(default_factory=list)
 
     front_matter_loader = '__import__("midgy").front_matter.load'
     quote_char = chr(34)
 
     def code_block(self, token, env):
-        yield from super().code_block(token, env)
-        left = token.content.rstrip()
-        continued = left.endswith("\\")
-        if continued:
-            left = left[:-1]
-        env.update(
-            colon_block=left.endswith(":"),
-            quoted_block=left.endswith(QUOTES),
-            continued=continued,
-        )
+        if self.include_indented_code:
+            yield from super().code_block(token, env)
+            left = token.content.rstrip()
+            continued = left.endswith("\\")
+            if continued:
+                left = left[:-1]
+            env.update(
+                colon_block=left.endswith(":"),
+                quoted_block=left.endswith(QUOTES),
+                continued=continued,
+            )
 
     def code_fence_block(self, token, env):
         yield self.comment(self.get_block(env, token.map[0] + 1), env)
@@ -74,7 +75,7 @@ class Python(DedentCodeBlock):
 
     def format(self, body):
         """blacken the python"""
-        from black import format_str, FileMode
+        from black import FileMode, format_str
 
         return format_str(body, mode=FileMode())
 
@@ -105,10 +106,7 @@ class Python(DedentCodeBlock):
             map(escape, body),
             lead=lead,
             trail=trail,
-            continuation=self.extend_continuations
-            and env.get("continued")
-            and "\\"
-            or "",
+            continuation=self.extend_continuations and env.get("continued") and "\\" or "",
         )
 
     def non_code_comment(self, env, next=None):
@@ -131,6 +129,16 @@ class Python(DedentCodeBlock):
             else:
                 spaces += 4  # add post colon default spaces.
         return spaces - env.get("min_indent", 0)
+
+
+tangle = md_to_python = Python.code_from_string
+
+
+@dataclass
+class FencedPython(Python):
+    """a line-for-line markdown to python translator"""
+
+    include_code_fences: list = field(default_factory=["python", ""].copy)
 
 
 tangle = md_to_python = Python.code_from_string

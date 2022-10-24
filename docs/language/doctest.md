@@ -28,7 +28,7 @@ and is not a doctest
 
 ```markdown
 +++
-["*"]
+[py]
 include_doctest = true
 include_front_matter = false
 +++
@@ -38,7 +38,7 @@ include_front_matter = false
 
 ```python
 # +++
-# ["*"]
+# [py]
 # include_doctest = true
 # include_front_matter = false
 # +++

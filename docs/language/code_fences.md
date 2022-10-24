@@ -1,8 +1,13 @@
++++
+[py]
+include_code_fences = ["python", ""]
++++
+
 ### tangling code with indented code fences
 
 *******************************************************
 
-most code fences are treated as noncode
+fences are commented when code
 
 ````markdown
 ```python

@@ -1,18 +1,24 @@
 from pathlib import Path
+
 from pytest import mark
+
 import midgy
 
 HERE = Path(__file__).parent
 
+import midgy.python
 import midgy.render
 
 
 def gen_tests():
-    parser = midgy.render.Renderer()
+    basic = midgy.render.Renderer()
     for file in HERE.glob("*.md"):
         source = file.read_text()
         lines = source.splitlines()
-        for cell in parser.render_cells(source):
+        tokens = basic.parse(source)
+        parser = midgy.Python().renderer_from_tokens(tokens)
+        print(parser)
+        for cell in basic.render_cells(source):
             if not cell.lstrip().startswith("*"):
                 continue
             cell = "".join(cell.splitlines(True)[1:])
@@ -30,7 +36,8 @@ def gen_tests():
                         o = token.content
             name = get_description(tokens)
             if name:
-                yield (file.stem, name), (i, o)
+                yield (file.stem, name), (i, o, parser)
+
 
 def get_description(tokens):
     for token in tokens:
@@ -44,12 +51,11 @@ def get_description(tokens):
         break
 
 
-
 cases = dict(gen_tests())
 
 
 @mark.parametrize("f,n", cases)
 def test_language(f, n):
-    i, o = cases[f, n]
-    gen = midgy.Python().render(i)
+    i, o, parser = cases[f, n]
+    gen = parser.render(i)
     assert gen == o

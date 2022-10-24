@@ -1,6 +1,7 @@
-from pathlib import Path
 from argparse import ArgumentParser
-from .run import Markdown
+from pathlib import Path
+
+from .loader import Markdown
 
 parser = ArgumentParser("midgy", description="run markdown files")
 sub = parser.add_subparsers(dest="subparser")
@@ -29,19 +30,7 @@ except ModuleNotFoundError:
 def main(parser=parser):
     from sys import argv
 
-    argv = argv[1:]
-    if argv[0] not in subs:
-        argv.insert(0, "run")
-
-    ns, _ = parser.parse_known_args(argv)
-    ns = vars(ns)
-
-    subparser = ns.pop("subparser")
-    if subparser in {None, "run"}:
-        from .run import Markdown
-
-        Markdown.load_argv(argv[1:])
-        return
+    Markdown.load_argv(argv[1:])
 
 
 if __name__ == "__main__":

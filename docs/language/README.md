@@ -1,5 +1,3 @@
-#!/usr/env/bin midgy
-
 # the `midgy` language tests
 
 

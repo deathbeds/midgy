@@ -69,14 +69,14 @@ exclude front matter from parsing
 
 ```markdown
 +++
-["*"]
+[py]
 include_front_matter = false
 +++
 ```
 
 ```python
 # +++
-# ["*"]
+# [py]
 # include_front_matter = false
 # +++
 ```
