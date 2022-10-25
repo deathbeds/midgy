@@ -8,7 +8,6 @@ sub = parser.add_subparsers(dest="subparser")
 run = sub.add_parser("run")
 run = Markdown.get_argparser(run)
 run.add_argument(
-    "-t",
     "--doctest-is-code",
     action="store_true",
     help="include doctest input in code generation.",
