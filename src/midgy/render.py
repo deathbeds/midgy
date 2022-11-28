@@ -14,7 +14,7 @@ ESCAPE = {x: "\\" + x for x in "'\""}
 ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
 ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
-
+    
 
 # the Renderer is special markdown renderer designed to produce
 # line for line transformations of markdown to the converted code.
@@ -30,35 +30,38 @@ class Renderer:
     * a reusable base class that underlies the python translation
     """
 
-    from markdown_it import MarkdownIt
 
-    parser: object = field(
-        default_factory=partial(
-            MarkdownIt, "gfm-like", options_update=dict(inline_definitions=True, langPrefix="")
-        )
-    )
+    parser: object = None
     cell_hr_length: int = 9
     include_code_fences: set = field(default_factory=set)
     include_indented_code: bool = True
     config_key: str = "py"
 
     def __post_init__(self):
+        self.parser = self.get_parser()
+
+    def get_parser(self):
+        from markdown_it import MarkdownIt
+
         from mdit_py_plugins import deflist, footnote
 
         from .front_matter import _front_matter_lexer, _shebang_lexer
-
+        parser = MarkdownIt("gfm-like", options_update=dict(inline_definitions=True, langPrefix=""))
         # our tangling system adds extra conventions to commonmark:
         ## extend indented code to recognize doctest syntax in-line
         ## replace the indented code lexer to recognize doctests and append metadata.
         ## recognize shebang lines at the beginning of a document.
         ## recognize front-matter at the beginning of document of following shebangs
-        self.parser.block.ruler.before("code", "doctest", _doctest_lexer)
-        self.parser.block.ruler.disable("code")
-        self.parser.block.ruler.after("doctest", "code", _code_lexer)
-        self.parser.block.ruler.before("table", "shebang", _shebang_lexer)
-        self.parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
-        self.parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
-        self.parser.disable("footnote_tail")
+        parser.block.ruler.before("code", "doctest", _doctest_lexer)
+        parser.block.ruler.disable("code")
+        parser.block.ruler.after("doctest", "code", _code_lexer)
+        parser.block.ruler.before("table", "shebang", _shebang_lexer)
+        parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
+        parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
+        parser.disable("footnote_tail")
+        return parser
+
+
 
     def code_block(self, token, env):
         if self.include_indented_code:
@@ -260,9 +263,7 @@ class Renderer:
                 prior.append(token)
         yield prior, None
 
-    del MarkdownIt
-
-
+    
 @dataclass
 class DedentCodeBlock(Renderer):
     def code_block(self, token, env):
