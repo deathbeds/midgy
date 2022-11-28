@@ -1,6 +1,7 @@
 """run and import markdown files as python"""
 from dataclasses import dataclass, field
 
+from types import MethodType
 from importnb import Notebook
 
 from .python import Python
@@ -19,17 +20,17 @@ class Markdown(Notebook):
     def __post_init__(self):
         self.renderer = self.render_cls(include_doctest=self.include_doctest)
 
-    def get_data(self, path):
-        if self.path.endswith(".md"):
-            self.source = self.decode()
-            return self.code(self.source)
-        return super(Notebook, self).get_data(path)
+    def exec_module(self, module):
+        super().exec_module(module)
+        module._repr_markdown_ = MethodType(repr_markdown, module)
 
     def code(self, str):
         return super().code(self.renderer.render("".join(str)))
 
-    get_source = get_data
 
+def repr_markdown(self):
+    with open(self.__file__) as file:
+        return F"\t{repr(self)}\n" + file.read()
 
 if __name__ == "__main__":
     from sys import argv

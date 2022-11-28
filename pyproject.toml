@@ -45,6 +45,9 @@ Documentation = "https://github.com/deathbeds/midgy#readme"
 Issues = "https://github.com/deathbeds/midgy/issues"
 Source = "https://github.com/deathbeds/midgy"
 
+[project.entry-points.importnb]
+md = "midgy.loader:Markdown"
+
 [tool.hatch.version]
 source = "vcs"
 
