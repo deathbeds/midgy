@@ -46,7 +46,7 @@ a paragraph with a list following:
 
 *******************************************************
 
-0-3 indents are treated as non-code
+0-3 indents are treated as non-code and represented as strings
 
 ```markdown
    an indented markdown line
@@ -82,11 +82,13 @@ print("hello world")
 
 -------------------------------------------------------
 
-## code and non-code
+## mixing code and non-code blocks
+
+we are only concerned with block level markdown tokens when transpiling to python. through this lens a document is a collection of code and non-code blocks. 
 
 *******************************************************
 
-code before markdown requires a dedent
+code before markdown requires a dedent and zero or more newlines
 
 ```markdown
     x = "code before markdown"
@@ -100,7 +102,7 @@ x = "code before markdown"
 
 *******************************************************
 
-code after markdown requires a blank line
+code after markdown requires at least one new line
 
 ```markdown
 a markdown paragraph before code
@@ -116,7 +118,7 @@ x = "code after markdown"
 
 *******************************************************
 
-triple double-quotes indicate explicit strings
+triple double-quotes indicate explicit strings with whitespace included
     
 ```markdown
     """
@@ -138,7 +140,7 @@ with lines
 
 *******************************************************
 
-triple single-quotes indicate explicit strings
+triple single-quotes indicate explicit strings with whitespace included
     
 ```markdown
     '''
@@ -159,10 +161,11 @@ with lines
 ```
 *******************************************************
 
-markdown following a colon block (function) is indented
+markdown following a colon block (function) is indented and is the docstring
     
 ```markdown
         def f():
+
 the docstring of the function f
 
         print(f())
@@ -170,6 +173,7 @@ the docstring of the function f
 
 ```python
 def f():
+
     """the docstring of the function f"""
 
 print(f())
@@ -177,7 +181,7 @@ print(f())
 
 *******************************************************
 
-markdown following a colon block (function) aligns to trailing code
+markdown following a colon block (function) aligns to trailing code and is the docstring
     
 ```markdown
         def f():
@@ -196,7 +200,7 @@ def f():
 
 *******************************************************
 
-line continuations provide interoperability
+line continuations connect code to lines to markdown lines
 
 ```markdown
             foo =\
@@ -208,4 +212,65 @@ line continuations assign this string to `foo`
 foo =\
 \
 """line continuations assign this string to `foo`""";
+```
+
+
+*******************************************************
+
+line continuations remove whitespace when using explicit quotes
+
+```markdown
+            foo = """\
+
+
+line continuations remove the whitespace\
+
+            """.split()
+```
+
+```python
+foo = """\
+\
+\
+"""line continuations remove the whitespace"""\
+\
+""".split()
+```
+
+*******************************************************
+
+markdown can be used as parameters in a function call.
+
+```markdown
+    requests.get(
+https://api.github.com
+
+    )
+```
+
+```python
+requests.get(
+"""https://api.github.com"""
+
+)
+```
+
+*******************************************************
+
+as parameters, markdown blocks can be manipulated with python
+
+```markdown
+    urls = [ url.lstrip("*").lstrip() for url in 
+* https://api.github.com
+* https://google.com
+
+        .splitlines()]
+```
+
+```python
+urls = [url.lstrip("*").lstrip() for url in 
+"""* https://api.github.com
+* https://google.com"""
+
+    .splitlines()]
 ```

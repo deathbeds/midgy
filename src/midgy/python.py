@@ -34,8 +34,7 @@ class Python(DedentCodeBlock):
             yield from super().code_block(token, env)
             left = token.content.rstrip()
             continued = left.endswith("\\")
-            if continued:
-                left = left[:-1]
+
             env.update(
                 colon_block=left.endswith(":"),
                 quoted_block=left.endswith(QUOTES),
@@ -106,7 +105,7 @@ class Python(DedentCodeBlock):
             map(escape, body),
             lead=lead,
             trail=trail,
-            continuation=self.extend_continuations and env.get("continued") and "\\" or "",
+            continuation=env.get("continued") and "\\" or "",
         )
 
     def non_code_comment(self, env, next=None):
