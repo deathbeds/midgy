@@ -1,70 +1,84 @@
-"""a minimal conversion from markdown to python code based on indented code blocks"""
+"""the Python class that translates markdown to python code"""
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from textwrap import dedent, indent
-
-from .render import DedentCodeBlock, escape
+from io import StringIO
+from .render import Renderer, escape
 
 __all__ = "Python", "md_to_python"
 SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
 
-# the Python class translates markdown to python with the minimum number
-# of modifications necessary to have valid python code. midgy will:
-## add triple quotes to make python block strings of markdown blocks
-## escape quotes in markdown blocks
-## add indents to conform with python concepts
-# overall spaces, quotes, unicode escapes will be added to your markdown source.
+
 @dataclass
-class Python(DedentCodeBlock):
+class Python(Renderer):
     """a line-for-line markdown to python translator"""
 
+    # include markdown as docstrings of functions and classes
     include_docstring: bool = True
+    # include docstring as a code block
     include_doctest: bool = False
+    # include front matter as a code block
     include_front_matter: bool = True
+    # include markdown in that code as strings, (False) uses comments
     include_markdown: bool = True
-    extend_continuations: bool = True
-    include_code_fences: list = field(default_factory=list)
+    # code fence languages that indicate a code block
+    include_code_fences: list = field(default_factory=["python"].copy)
 
     front_matter_loader = '__import__("midgy").front_matter.load'
-    quote_char = chr(34)
+    _quote_char = chr(34)
 
     def code_block(self, token, env):
-        if self.include_indented_code:
-            yield from super().code_block(token, env)
-            left = token.content.rstrip()
-            continued = left.endswith("\\")
-
-            env.update(
-                colon_block=left.endswith(":"),
-                quoted_block=left.endswith(QUOTES),
-                continued=continued,
-            )
+        """return raw indent code block"""
+        yield from super().code_block(token, env)
+        self.get_updated_env(token, env)
 
     def code_fence_block(self, token, env):
-        yield self.comment(self.get_block(env, token.map[0] + 1), env)
-        yield from self.get_block(env, token.map[1] - 1)
-        yield self.comment(self.get_block(env, token.map[1]), env)
-        env.update(colon_block=False, quoted_block=False, continued=False)
+        """return a modified code fence that identifies as code"""
 
-    def comment(self, body, env):
-        return indent(dedent("".join(body)), SP * self._compute_indent(env) + "# ")
+        # clear the cache of any non-code in the buffer
+        yield from self.non_code(env, token)
+        # comment out the leading line of code fences
+        yield from self.comment(
+            self.get_block(env, token.map[0] + 1), token.meta["first_indent"]
+        )
+        # return the actual code
+        yield from self.get_block(env, token.map[1] - 1)
+        # comment out the last line of code fences
+        yield from self.comment(
+            self.get_block(env, token.map[1]), token.meta["last_indent"]
+        )
+        # push token metadata to the parser
+        self.get_updated_env(token, env)
+
+    def comment(self, block, indent_or_env):
+        """comment a block of code"""
+        if not isinstance(indent_or_env, int):
+            indent_or_env = self.get_computed_indent(indent_or_env)
+        yield from self.wrap_lines(block, pre=SP * indent_or_env + "# ")
 
     def doctest_comment(self, token, env):
+        """comment a doctest block"""
         yield from self.non_code(env, token)
-        yield (self.comment(self.get_block(env, token.map[1]), env),)
+        yield self.comment(self.get_block(env, token.map[1]), env)
 
     def doctest_code(self, token, env):
-        ref = env["min_indent"]
+        """return a doctest as a block of code.
+
+        * inputs are returned as code
+        * output is commented"""
         yield from self.non_code(env, token)
         for line in self.get_block(env, token.meta["input"][1]):
             right = line.lstrip()
-            yield line[ref : len(line) - len(right)] + right[4:]
+            yield line[: len(line) - len(right)] + right[4:]
         if token.meta["output"]:
             yield self.comment(self.get_block(env, token.meta["output"][1]), env)
         env.update(colon_block=False, quoted_block=False, continued=False)
 
     def fence_pycon(self, token, env):
+        """comment, render, or string a block of doctest code
+
+        pycon is the pygments identifier to the python console"""
         if self.include_doctest:
             yield from self.doctest_code(token, env)
         elif self.include_docstring and self.include_markdown:
@@ -79,45 +93,92 @@ class Python(DedentCodeBlock):
         return format_str(body, mode=FileMode())
 
     def front_matter(self, token, env):
+        """comment, codify, or stringify blocks of front matter"""
         if self.include_front_matter:
-            trail = self.quote_char * 3
+            trail = self._quote_char * 3
+            # lead front matter with an invocation, paren, and quotes
             lead = f"locals().update({self.front_matter_loader}(" + trail
+            # trail front matter with paren, and quote
             trail += "))"
             body = self.get_block(env, token.map[1])
-            yield from self.wrap_lines(body, lead=lead, trail=trail)
+            print(env.get("min_indent", 0))
+            yield from self.wrap_lines(
+                body, lead=lead, pre=SP * env.get("min_indent", 0), trail=trail
+            )
         else:
-            yield self.comment(self.get_block(env, token.map[1]), env)
+            yield from self.comment(self.get_block(env, token.map[1]), env)
 
     def non_code(self, env, next=None):
+        """stringify or comment non code blocks"""
         if env.get("quoted_block", False):
-            yield from super().non_code(env, next)
+            yield from self.wrap_lines(super().non_code(env, next), pre=SP*env["min_indent"])
         elif self.include_markdown:
             yield from self.non_code_block_string(env, next)
         else:
             yield from self.non_code_comment(env, next)
 
     def non_code_block_string(self, env, next=None):
+        """codify markdown as a block string"""
         body = super().non_code(env, next)
-        trail = self.quote_char * 3
-        lead = SP * self._compute_indent(env) + trail
+        lead = trail = self._quote_char * 3
+        indent = self.get_computed_indent(env)
+        # add quotes + trailing text on the whole block
         trail += "" if next else ";"
         yield from self.wrap_lines(
             map(escape, body),
             lead=lead,
             trail=trail,
+            pre = SP*indent, 
             continuation=env.get("continued") and "\\" or "",
         )
 
     def non_code_comment(self, env, next=None):
+        """comment non code blocks"""
         yield self.comment(super().non_code(env, next), env)
 
-    def render_tokens(self, tokens, env=None, stop=None, src=None):
-        return dedent(super().render_tokens(tokens, env=env, stop=stop, src=src))
-
     def shebang(self, token, env):
-        yield "".join(self.get_block(env, token.map[1]))
+        """return the shebang line"""
+        yield from self.wrap_lines(self.get_block(env, token.map[1]), pre=SP*env["min_indent"])
 
-    def _compute_indent(self, env):
+    def get_updated_env(self, token, env):
+        """update the state of the environment"""
+        left = token.content.rstrip()
+        continued = left.endswith("\\")
+
+        env.update(
+            colon_block=left.endswith(":"),
+            quoted_block=left.endswith(QUOTES),
+            continued=continued,
+        )
+
+    def wrap_lines(self, lines, lead="", pre="", trail="", continuation=""):
+        """a utility function to manipulate a buffer of content line-by-line."""
+        ws, any, continued = "", False, False
+        for line in lines:
+            LL = len(line.rstrip())
+            if LL:
+                continued = line[LL - 1] == "\\"
+                LL -= 1 * continued
+                if any:
+                    yield ws
+                else:
+                    for i, l in enumerate(StringIO(ws)):
+                        yield pre
+                        yield  l[:-1] + continuation + l[-1]
+                yield from (pre, lead, line[:LL])
+                any, ws = True, line[LL:]
+                lead = ""
+            else:
+                ws += line
+        if any:
+            yield trail
+        if continued:
+            for i, line in enumerate(StringIO(ws)):
+                yield from (i and pre or "", line[:-1], i and "\\" or "", line[-1])
+        else:
+            yield ws
+
+    def get_computed_indent(self, env):
         """compute the indent for the first line of a non-code block."""
         next = env.get("next_code")
         next_indent = next.meta["first_indent"] if next else 0
@@ -127,17 +188,7 @@ class Python(DedentCodeBlock):
                 spaces = next_indent  # prefer greater trailing indent
             else:
                 spaces += 4  # add post colon default spaces.
-        return spaces - env.get("min_indent", 0)
-
-
-tangle = md_to_python = Python.code_from_string
-
-
-@dataclass
-class FencedPython(Python):
-    """a line-for-line markdown to python translator"""
-
-    include_code_fences: list = field(default_factory=["python", ""].copy)
+        return max(spaces, env["min_indent"])
 
 
 tangle = md_to_python = Python.code_from_string

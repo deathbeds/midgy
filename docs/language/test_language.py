@@ -27,7 +27,7 @@ def gen_tests():
                 continue
 
             name, i, o = None, None, None
-            env = parser._init_env(cell, tokens)
+            env = parser.get_initial_env(cell, tokens)
             for n, token in enumerate(tokens):
                 if token.type == "fence":
                     if token.info == "markdown":

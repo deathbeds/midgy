@@ -260,7 +260,7 @@ requests.get(
 as parameters, markdown blocks can be manipulated with python
 
 ```markdown
-    urls = [ url.lstrip("*").lstrip() for url in 
+    urls = [url.lstrip("*").lstrip() for url in 
 * https://api.github.com
 * https://google.com
 

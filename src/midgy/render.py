@@ -14,7 +14,7 @@ ESCAPE = {x: "\\" + x for x in "'\""}
 ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
 ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
-    
+
 
 # the Renderer is special markdown renderer designed to produce
 # line for line transformations of markdown to the converted code.
@@ -30,11 +30,11 @@ class Renderer:
     * a reusable base class that underlies the python translation
     """
 
-
     parser: object = None
     cell_hr_length: int = 9
     include_code_fences: set = field(default_factory=set)
     include_indented_code: bool = True
+    include_doctest: bool = False
     config_key: str = "py"
 
     def __post_init__(self):
@@ -43,29 +43,34 @@ class Renderer:
     def get_parser(self):
         from markdown_it import MarkdownIt
 
-        from mdit_py_plugins import deflist, footnote
-
-        from .front_matter import _front_matter_lexer, _shebang_lexer
         parser = MarkdownIt("gfm-like", options_update=dict(inline_definitions=True, langPrefix=""))
+        return self.set_parser_defaults(parser)
+
+    def set_parser_defaults(self, parser):
         # our tangling system adds extra conventions to commonmark:
         ## extend indented code to recognize doctest syntax in-line
         ## replace the indented code lexer to recognize doctests and append metadata.
         ## recognize shebang lines at the beginning of a document.
         ## recognize front-matter at the beginning of document of following shebangs
+        from mdit_py_plugins import deflist, footnote
+        from .front_matter import _front_matter_lexer, _shebang_lexer
+
         parser.block.ruler.before("code", "doctest", _doctest_lexer)
         parser.block.ruler.disable("code")
+        # our indented code captures doctests in indented blocks
         parser.block.ruler.after("doctest", "code", _code_lexer)
+        parser.disable("fence")
+        # our code fence captures indent information
+        parser.block.ruler.after("code", "fence", code_fence)
+        # shebang because this markdown is code
         parser.block.ruler.before("table", "shebang", _shebang_lexer)
         parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
         parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
         parser.disable("footnote_tail")
         return parser
 
-
-
     def code_block(self, token, env):
-        if self.include_indented_code:
-            yield from self.get_block(env, token.map[1])
+        yield from self.get_block(env, token.map[1])
 
     code_fence_block = code_block
 
@@ -75,7 +80,10 @@ class Renderer:
         return cls(**kwargs).render(body)
 
     def fence(self, token, env):
-        if token.info in self.include_code_fences:
+        """the fence renderer is pluggable.
+
+        if token_{token.info} exists then that method is called to render the token"""
+        if self.include_code_fences and token.info in self.include_code_fences:
             return self.code_fence_block(token, env)
         method = getattr(self, f"fence_{token.info}", None)
         if method:
@@ -121,13 +129,14 @@ class Renderer:
     def render_cells(self, src, *, include_cell_hr=True):
         tokens = self.parse(src)
         self = self.renderer_from_tokens(tokens)
-        prior = self._init_env(src, tokens)
+        prior = self.get_initial_env(src, tokens)
         prior_token = None
         source = prior.pop("source")
+
         for block, next_token in self.walk_cells(
             tokens, env=prior, include_cell_hr=include_cell_hr
         ):
-            env = self._init_env(src, block)
+            env = self.get_initial_env(src, block)
             env["source"], env["last_line"] = source, prior["last_line"]
             prior_token and block.insert(0, prior_token)
             yield self.render_tokens(block, env=env, stop=next_token)
@@ -137,21 +146,26 @@ class Renderer:
         return dedent(self.render("".join(src))).splitlines(True)
 
     def renderer_from_tokens(self, tokens):
-        front_matter = self._get_front_matter(tokens)
+        front_matter = self.get_front_matter(tokens)
         if front_matter:
+            # front matter can reconfigure the parser and make a new one
             config = front_matter.get(self.config_key, None)
             if config:
+                print(config)
                 return type(self)(**config)
         return self
 
-    def render_tokens(self, tokens, env=None, src=None, stop=None):
+    def render_token(self, token, env):
+        return getattr(self, token.type)(token, env)
+
+    def render_tokens(self, tokens, env=None, src=None, stop=None, target=None):
         """render parsed markdown tokens"""
-        target = StringIO()
+        if target is None:
+            target = StringIO()
         self = self.renderer_from_tokens(tokens)
         if env is None:
-            env = self._init_env(src, tokens)
-
-        for generic, code in self._walk_code_blocks(tokens):
+            env = self.get_initial_env(src, tokens)
+        for generic, code in self.walk_code_blocks(tokens):
             # we walk pairs of tokens preceding code and the code token
             # the next code token is needed as a reference for indenting
             # non-code blocks that precede the code.
@@ -166,68 +180,37 @@ class Renderer:
             if code:
                 # format and print the preceding non-code block
                 self.print(self.non_code(env, code), target)
-
                 # update the rendering environment
-                env.update(
-                    last_indent=code.meta["last_indent"],
-                )
-
-                # format and print
-                self.print(self.code_block(code, env), target)
+                env.update(last_indent=code.meta["last_indent"])
+                if self.include_indented_code and code.type == "code_block":
+                    self.print(self.code_block(code, env), target)
+                elif code.type == "fence":
+                    if code.info in self.include_code_fences:
+                        self.print(self.code_fence_block(code, env), target)
+                    elif code.info == "pycon":
+                        self.print(self.doctest_code(code, env), target)
 
         # handle anything left in the buffer
         self.print(self.non_code(env, stop), target)
 
-        return target.getvalue()  # return the value of the target, a format string.
+        return dedent(target.getvalue())  # return the value of the target, a format string.
 
-    def wrap_lines(self, lines, lead="", pre="", trail="", continuation=""):
-        """a utility function to manipulate a buffer of content line-by-line."""
-        ws, any, continued = "", False, False
-        for line in lines:
-            LL = len(line.rstrip())
-            if LL:
-                continued = line[LL - 1] == "\\"
-                LL -= 1 * continued
-                if any:
-                    yield ws
-                else:
-                    for i, l in enumerate(StringIO(ws)):
-                        yield l[:-1] + continuation + l[-1]
-                yield from (lead, line[:LL])
-                any, ws = True, line[LL:]
-                lead = ""
-            else:
-                ws += line
-        if any:
-            yield trail
-        if continued:
-            for i, line in enumerate(StringIO(ws)):
-                yield from (lead, line[:-1], i and "\\" or "", line[-1])
-        else:
-            yield ws
+    def get_initial_env(self, src, tokens):
+        """initialize the parser environment
 
-    def _init_env(self, src, tokens):
-        env = dict(source=StringIO(src), last_line=0, min_indent=None, last_indent=0)
-        include_doctest = getattr(self, "include_doctest", False)
-        for token in tokens:
-            doctest = False
-            if token.type == "fence":
-                if token.info in self.include_code_fences:
-                    env["min_indent"] = 0
-                    continue
-                if include_doctest:
-                    doctest = token.info == "pycon"
-            if doctest or (token.type == "code_block"):
-                if env["min_indent"] is None:
-                    env["min_indent"] = token.meta["min_indent"]
-                else:
-                    env["min_indent"] = min(env["min_indent"], token.meta["min_indent"])
-
-        if env["min_indent"] is None:
-            env["min_indent"] = 0
+        peek into the tokens looking for the first code token identified."""
+        env = dict(source=StringIO(src), last_line=0, last_indent=0)
+        for token in tokens:  # iterate through the tokens
+            is_code = self.is_code_block(token)
+            if is_code or token.type == "code_block":
+                env["min_indent"] = min(
+                    env.setdefault("min_indent", 9999), token.meta["min_indent"]
+                )
+        env.setdefault("min_indent", 4)
+        print(env)
         return env
 
-    def _get_front_matter(self, tokens):
+    def get_front_matter(self, tokens):
         for token in tokens:
             if token.type == "shebang":
                 continue
@@ -238,6 +221,7 @@ class Renderer:
             return
 
     def walk_cells(self, tokens, *, env=None, include_cell_hr=True):
+        """walk cells separated by mega-hrs"""
         block = []
         for token in tokens:
             if token.type == "hr":
@@ -253,28 +237,29 @@ class Renderer:
         if block:
             yield block, None
 
-    def _walk_code_blocks(self, tokens):
+    def is_code_block(self, token):
+        """is the token a code block entry"""
+        if token.type == "code_block":
+            return True
+        if token.type == "fence":
+            if token.info in self.include_code_fences:
+                return True
+            if self.include_doctest and token.info == "pycon":
+                return True
+        return False
+
+    def walk_code_blocks(self, tokens):
+        """separate non code blocks and blocks
+
+        a pair of non-code/code blocks are yield when indented code is discovered."""
         prior = []
         for token in tokens:
-            if token.type == "code_block":
+            if self.is_code_block(token):
                 yield list(prior), token
                 prior.clear()
             else:
                 prior.append(token)
         yield prior, None
-
-    
-@dataclass
-class DedentCodeBlock(Renderer):
-    def code_block(self, token, env):
-        ref = env["min_indent"]
-        for line in self.get_block(env, token.map[1]):
-            right = line.lstrip()
-            if right:
-                yield line[ref:]
-                last = right
-            else:
-                yield line
 
 
 def _code_lexer(state, start, end, silent=False):
@@ -329,7 +314,7 @@ def _doctest_lexer(state, startLine, end, silent=False):
     """
     start = state.bMarks[startLine] + state.tShift[startLine]
 
-    if (start - state.blkIndent) < 4:
+    if (state.sCount[startLine] - state.blkIndent) < 4:
         return False
 
     if state.srcCharCode[start : start + 4] == DOCTEST_CHARS:
@@ -360,9 +345,28 @@ def _doctest_lexer(state, startLine, end, silent=False):
             last_indent=indent,
             min_indent=indent,
         )
-
         token.meta.update(input=[lead, extra])
         token.meta.update(output=[extra, output] if extra < output else None)
 
         return True
     return False
+
+
+def code_fence(state, *args, **kwargs):
+    from markdown_it.rules_block.fence import fence
+
+    result = fence(state, *args, **kwargs)
+    if result:
+        token = state.tokens[-1]
+        first_indent, last_indent = None, 0
+        extent = range(token.map[0] + 1, token.map[1] - 1)
+        for next in extent:
+            if first_indent is None:
+                first_indent = state.sCount[next]
+            last_indent = state.sCount[next]
+        min_indent = min([state.sCount[i] for i in extent if not state.isEmpty(i)] or [0])
+
+        token.meta.update(
+            first_indent=first_indent or 0, last_indent=last_indent, min_indent=min_indent
+        )
+    return result
