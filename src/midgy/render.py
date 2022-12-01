@@ -70,9 +70,9 @@ class Renderer:
         return parser
 
     def code_block(self, token, env):
-        yield from self.get_block(env, token.map[1])
-
-    code_fence_block = code_block
+        if self.include_indented_code:
+            yield from self.non_code(env, token)
+            yield from self.get_block(env, token.map[1])
 
     @classmethod
     def code_from_string(cls, body, **kwargs):
@@ -83,8 +83,6 @@ class Renderer:
         """the fence renderer is pluggable.
 
         if token_{token.info} exists then that method is called to render the token"""
-        if self.include_code_fences and token.info in self.include_code_fences:
-            return self.code_fence_block(token, env)
         method = getattr(self, f"fence_{token.info}", None)
         if method:
             return method(token, env)
@@ -103,14 +101,14 @@ class Renderer:
 
     def non_code(self, env, next=None):
         yield from self.get_block(env, next.map[0] if next else None)
+        if next:
+            env.update(last_indent=next.meta.get("last_indent", 0))
 
     def parse(self, src):
         return self.parser.parse(src)
 
-    def parse_cells(self, body, *, include_cell_hr=True):
-        yield from (
-            x[0] for x in self.walk_cells(self.parse(body), include_cell_hr=include_cell_hr)
-        )
+    def parse_cells(self, body, *, include_hr=True):
+        yield from (x[0] for x in self.walk_cells(self.parse(body), include_hr=include_hr))
 
     def print(self, iter, io):
         return print(*iter, file=io, sep="", end="")
@@ -122,20 +120,17 @@ class Renderer:
             env["last_line"] += 1
 
     def render(self, src, format=False):
-        tokens = self.parse(src)
-        out = self.render_tokens(tokens, src=src)
+        out = self.render_tokens(self.parse(src), src=src)
         return self.format(out) if format else out
 
-    def render_cells(self, src, *, include_cell_hr=True):
+    def render_cells(self, src, *, include_hr=True):
         tokens = self.parse(src)
         self = self.renderer_from_tokens(tokens)
         prior = self.get_initial_env(src, tokens)
         prior_token = None
         source = prior.pop("source")
 
-        for block, next_token in self.walk_cells(
-            tokens, env=prior, include_cell_hr=include_cell_hr
-        ):
+        for block, next_token in self.walk_cells(tokens, env=prior, include_hr=include_hr):
             env = self.get_initial_env(src, block)
             env["source"], env["last_line"] = source, prior["last_line"]
             prior_token and block.insert(0, prior_token)
@@ -143,7 +138,7 @@ class Renderer:
             prior, prior_token = env, next_token
 
     def render_lines(self, src):
-        return dedent(self.render("".join(src))).splitlines(True)
+        return self.render("".join(src)).splitlines(True)
 
     def renderer_from_tokens(self, tokens):
         front_matter = self.get_front_matter(tokens)
@@ -151,12 +146,14 @@ class Renderer:
             # front matter can reconfigure the parser and make a new one
             config = front_matter.get(self.config_key, None)
             if config:
-                print(config)
                 return type(self)(**config)
         return self
 
     def render_token(self, token, env):
-        return getattr(self, token.type)(token, env)
+        if token:
+            method = getattr(self, token.type, None)
+            if method:
+                yield from method(token, env) or ()
 
     def render_tokens(self, tokens, env=None, src=None, stop=None, target=None):
         """render parsed markdown tokens"""
@@ -170,29 +167,10 @@ class Renderer:
             # the next code token is needed as a reference for indenting
             # non-code blocks that precede the code.
             env["next_code"] = code
-            for token in generic:
-                # walk the non-code tokens for any markers the class defines
-                # renderers for. the renderer is responsible for taking of the
-                # preceding non-code blocks, this feature is needed for any logical
-                # rendering conditions.
-                f = getattr(self, token.type, None)
-                f and self.print(f(token, env) or "", target)
-            if code:
-                # format and print the preceding non-code block
-                self.print(self.non_code(env, code), target)
-                # update the rendering environment
-                env.update(last_indent=code.meta["last_indent"])
-                if self.include_indented_code and code.type == "code_block":
-                    self.print(self.code_block(code, env), target)
-                elif code.type == "fence":
-                    if code.info in self.include_code_fences:
-                        self.print(self.code_fence_block(code, env), target)
-                    elif code.info == "pycon":
-                        self.print(self.doctest_code(code, env), target)
-
+            for token in generic + [code]:
+                self.print(self.render_token(token, env), target)
         # handle anything left in the buffer
         self.print(self.non_code(env, stop), target)
-
         return dedent(target.getvalue())  # return the value of the target, a format string.
 
     def get_initial_env(self, src, tokens):
@@ -201,13 +179,11 @@ class Renderer:
         peek into the tokens looking for the first code token identified."""
         env = dict(source=StringIO(src), last_line=0, last_indent=0)
         for token in tokens:  # iterate through the tokens
-            is_code = self.is_code_block(token)
-            if is_code or token.type == "code_block":
+            if self.is_code_block(token):
                 env["min_indent"] = min(
                     env.setdefault("min_indent", 9999), token.meta["min_indent"]
                 )
-        env.setdefault("min_indent", 4)
-        print(env)
+        env.setdefault("min_indent", 0)
         return env
 
     def get_front_matter(self, tokens):
@@ -220,7 +196,7 @@ class Renderer:
                 return load(token.content)
             return
 
-    def walk_cells(self, tokens, *, env=None, include_cell_hr=True):
+    def walk_cells(self, tokens, *, env=None, include_hr=True):
         """walk cells separated by mega-hrs"""
         block = []
         for token in tokens:
@@ -228,7 +204,7 @@ class Renderer:
                 if (len(token.markup) - token.markup.count(" ")) > self.cell_hr_length:
                     yield (list(block), token)
                     block.clear()
-                    if include_cell_hr:
+                    if include_hr:
                         block.append(token)
                     elif env is not None:
                         list(self.get_block(env, token))
@@ -239,9 +215,9 @@ class Renderer:
 
     def is_code_block(self, token):
         """is the token a code block entry"""
-        if token.type == "code_block":
+        if self.include_indented_code and token.type == "code_block":
             return True
-        if token.type == "fence":
+        elif token.type == "fence":
             if token.info in self.include_code_fences:
                 return True
             if self.include_doctest and token.info == "pycon":
