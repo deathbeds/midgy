@@ -14,6 +14,7 @@ ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
 ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
 SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
+MAGIC = compile("^\s*%{2}\S+")
 
 
 # the Renderer is special markdown renderer designed to produce
@@ -275,6 +276,7 @@ def _code_lexer(state, start, end, silent=False):
             first_indent=first_indent,
             last_indent=last_indent,
             min_indent=min_indent,
+            magic=bool(MAGIC.match(token.content)),
         )
         token.meta.update(meta)
         return True
@@ -301,7 +303,7 @@ def _doctest_lexer(state, startLine, end, silent=False):
 
     if state.srcCharCode[start : start + 4] == DOCTEST_CHARS:
         lead, extra, output, closed = startLine, startLine + 1, startLine + 1, False
-        indent, next = state.sCount[startLine], startLine + 1
+        indent, next, magic = state.sCount[startLine], startLine + 1, None
         while next < end:
             if state.isEmpty(next):
                 break
@@ -326,6 +328,7 @@ def _doctest_lexer(state, startLine, end, silent=False):
             first_indent=indent,
             last_indent=indent,
             min_indent=indent,
+            magic=bool(MAGIC.match(token.content.lstrip().lstrip(">").lstrip())),
         )
         token.meta.update(input=[lead, extra])
         token.meta.update(output=[extra, output] if extra < output else None)
@@ -349,6 +352,9 @@ def code_fence(state, *args, **kwargs):
         min_indent = min([state.sCount[i] for i in extent if not state.isEmpty(i)] or [0])
 
         token.meta.update(
-            first_indent=first_indent or 0, last_indent=last_indent, min_indent=min_indent
+            first_indent=first_indent or 0,
+            last_indent=last_indent,
+            min_indent=min_indent,
+            magic=bool(MAGIC.match(token.content)),
         )
     return result

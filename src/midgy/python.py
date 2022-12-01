@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from io import StringIO
+import os
 from .render import Renderer, escape
 
 __all__ = "Python", "md_to_python"
@@ -21,7 +22,7 @@ class Python(Renderer):
     # include markdown in that code as strings, (False) uses comments
     include_markdown: bool = True
     # code fence languages that indicate a code block
-    include_code_fences: list = field(default_factory=["python"].copy)
+    include_code_fences: list = field(default_factory=["python", "ipython"].copy)
 
     front_matter_loader = '__import__("midgy").front_matter.load'
     _quote_char = chr(34)
@@ -30,19 +31,47 @@ class Python(Renderer):
         """return raw indent code block"""
         if self.include_indented_code:
             yield from self.non_code(env, token)
-            yield from (line[env["min_indent"] :] for line in super().code_block(token, env))
+            if token.meta["magic"]:
+                yield from self.code_block_magic(super().code_block(token, env), token, env)
+            else:
+                yield from self.dedent_block(super().code_block(token, env), env["min_indent"])
             self.get_updated_env(token, env)
 
-    def comment(self, block, indent_or_env):
-        """comment a block of code"""
-        if not isinstance(indent_or_env, int):
-            indent_or_env = self.get_computed_indent(indent_or_env)
-        yield from self.wrap_lines(block, pre=SP * indent_or_env + "# ")
+    def code_block_magic(self, block, token, env, dedent=True):
+        # split the first line into the program and args
+        # wrap the last in blocks quotes
+        mindent = token.meta["min_indent"]
+        line = next(block)
+        program, *line = line.lstrip().lstrip("%").split(maxsplit=1)
+        line = "".join(line)
+        yield SP * self.get_computed_indent(env)
+        yield "get_ipython().run_cell_magic('"
+        yield from (program, "', '")
+        left = line.rstrip()
+        yield from left
+        yield from ("',", os.linesep)
+        if dedent:
+            block = self.dedent_block(block, mindent)
+        yield from self.wrap_lines(
+            block, lead=self._quote_char * 3, trail=self._quote_char * 3 + ")"
+        )
+
+    def comment(self, block, env):
+        yield from self.wrap_lines(block, pre=SP * self.get_computed_indent(env) + "# ")
+
+    def dedent_block(self, block, dedent):
+        yield from (x[dedent:] for x in block)
 
     def doctest_comment(self, token, env):
         """comment a doctest block"""
         yield from self.non_code(env, token)
-        yield self.comment(self.get_block(env, token.map[1]), env)
+        yield from self.comment(self.get_block(env, token.map[1]), env)
+
+    def doctest_code_input(self, token, env):
+        for line in self.get_block(env, token.meta["input"][1]):
+            # remove first 4 characters ">>> " and "... "
+            right = line.lstrip()
+            yield line[env["min_indent"] : len(line) - len(right)] + right[4:]
 
     def doctest_code(self, token, env):
         """return a doctest as a block of code.
@@ -50,12 +79,15 @@ class Python(Renderer):
         * inputs are returned as code
         * output is commented"""
         yield from self.non_code(env, token)
-        for line in self.get_block(env, token.meta["input"][1]):
-            # remove first 4 characters ">>> " and "... "
-            right = line.lstrip()
-            yield line[env["min_indent"] : len(line) - len(right)] + right[4:]
+        if token.meta["magic"]:
+            yield from self.code_block_magic(self.doctest_code_input(token, env), token, env, False)
+        else:
+            yield from self.doctest_code_input(token, env)
         if token.meta["output"]:
-            yield self.comment(self.get_block(env, token.meta["output"][1]), env)
+            block = self.dedent_block(
+                self.get_block(env, token.meta["output"][1]), token.meta["min_indent"]
+            )
+            yield from self.comment(block, env)
         self.get_updated_env(token, env)
 
         env.update(colon_block=False, quoted_block=False, continued=False)
@@ -79,15 +111,19 @@ class Python(Renderer):
             # clear the cache of any non-code in the buffer
             yield from self.non_code(env, token)
             # comment out the leading line of code fences
-            yield from self.comment(
-                self.get_block(env, token.map[0] + 1), token.meta["first_indent"]
-            )
-            # return the actual code
-            yield from self.get_block(env, token.map[1] - 1)
+            yield from self.comment(self.get_block(env, token.map[0] + 1), env)
+            block = self.get_block(env, token.map[1] - 1)
+            if token.meta["magic"]:
+                yield from self.code_block_magic(block, token, env)
+            else:
+                # return the actual code
+                yield from (line[line.strip() and env["min_indent"] or 0 :] for line in block)
             # comment out the last line of code fences
-            yield from self.comment(self.get_block(env, token.map[1]), token.meta["last_indent"])
-            # push token metadata to the parser
             self.get_updated_env(token, env)
+            yield from self.comment(self.get_block(env, token.map[1]), env)
+            # push token metadata to the parser
+
+    fence_ipython = fence_python
 
     def format(self, body):
         """blacken the python"""
@@ -143,7 +179,7 @@ class Python(Renderer):
 
     def non_code_comment(self, env, next=None):
         """comment non code blocks"""
-        yield self.comment(super().non_code(env, next), env)
+        yield from self.comment(super().non_code(env, next), env)
 
     def shebang(self, token, env):
         """return the shebang line"""
