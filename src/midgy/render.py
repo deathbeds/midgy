@@ -86,10 +86,6 @@ class Renderer:
         if method:
             return method(token, env)
 
-    def format(self, body):
-        """a function that consumers can use to format their code"""
-        return body
-
     def get_block(self, env, stop=None):
         """iterate through the lines in a buffer"""
         if stop is None:
@@ -126,9 +122,8 @@ class Renderer:
         finally:
             env["last_line"] += 1
 
-    def render(self, src, format=False):
-        out = self.render_tokens(self.parse(src), src=src)
-        return self.format(out) if format else out
+    def render(self, src):
+        return self.render_tokens(self.parse(src), src=src)
 
     def render_cells(self, src, *, include_hr=True):
         tokens = self.parse(src)
@@ -219,6 +214,9 @@ class Renderer:
                 block.append(token)
         if block:
             yield block, None
+
+    def is_code_fence(self, token):
+        return token.type == "fence" and token.type in self.include_code_fences
 
     def is_code_block(self, token):
         """is the token a code block entry"""

@@ -6,7 +6,7 @@ import os
 from .render import Renderer, escape
 
 __all__ = "Python", "md_to_python"
-SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
+SP, QUOTES = chr(32), (chr(34) * 3, chr(39) * 3)
 
 
 @dataclass
@@ -23,38 +23,44 @@ class Python(Renderer):
     include_markdown: bool = True
     # code fence languages that indicate a code block
     include_code_fences: list = field(default_factory=["python", "ipython"].copy)
+    include_magic: bool = True
 
     front_matter_loader = '__import__("midgy").front_matter.load'
-    _quote_char = chr(34)
+    QUOTE = QUOTES[0]
+
+    def is_magic(self, token):
+        if self.include_magic and token.meta["magic"]:
+            return True
+        return token.type == "fence" and token.info == "ipython"
+
+    def code_block_body(self, block, token, env):
+        if self.is_magic(token):
+            yield from self.code_block_magic(block, token, env)
+        else:
+            yield from self.dedent_block(block, env["min_indent"])
 
     def code_block(self, token, env):
         """return raw indent code block"""
         if self.include_indented_code:
             yield from self.non_code(env, token)
-            if token.meta["magic"]:
-                yield from self.code_block_magic(super().code_block(token, env), token, env)
-            else:
-                yield from self.dedent_block(super().code_block(token, env), env["min_indent"])
+            yield from self.code_block_body(super().code_block(token, env), token, env)
             self.get_updated_env(token, env)
 
     def code_block_magic(self, block, token, env, dedent=True):
         # split the first line into the program and args
         # wrap the last in blocks quotes
-        mindent = token.meta["min_indent"]
-        line = next(block)
-        program, *line = line.lstrip().lstrip("%").split(maxsplit=1)
-        line = "".join(line)
+        line, mindent = next(block), token.meta["min_indent"]
+        program, _, line = line.lstrip().lstrip("%").partition(" ")
+        # add whitespace relative to the indents allowing for condition magics
         yield SP * self.get_computed_indent(env)
-        yield "get_ipython().run_cell_magic('"
-        yield from (program, "', '")
+        # prefix the ipython run cell magic caller
+        yield ("get_ipython().run_cell_magic('", program, "', '")
         left = line.rstrip()
-        yield from left
-        yield from ("',", os.linesep)
+        yield from (left, "',", line[len(left) :])
         if dedent:
             block = self.dedent_block(block, mindent)
-        yield from self.wrap_lines(
-            block, lead=self._quote_char * 3, trail=self._quote_char * 3 + ")"
-        )
+        # quote the block of the cell body
+        yield from self.wrap_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
 
     def comment(self, block, env):
         yield from self.wrap_lines(block, pre=SP * self.get_computed_indent(env) + "# ")
@@ -84,12 +90,10 @@ class Python(Renderer):
         else:
             yield from self.doctest_code_input(token, env)
         if token.meta["output"]:
-            block = self.dedent_block(
-                self.get_block(env, token.meta["output"][1]), token.meta["min_indent"]
-            )
+            block = self.get_block(env, token.meta["output"][1])
+            block = self.dedent_block(block, token.meta["min_indent"])
             yield from self.comment(block, env)
         self.get_updated_env(token, env)
-
         env.update(colon_block=False, quoted_block=False, continued=False)
 
     def fence_pycon(self, token, env):
@@ -113,28 +117,15 @@ class Python(Renderer):
             # comment out the leading line of code fences
             yield from self.comment(self.get_block(env, token.map[0] + 1), env)
             block = self.get_block(env, token.map[1] - 1)
-            if token.meta["magic"]:
-                yield from self.code_block_magic(block, token, env)
-            else:
-                # return the actual code
-                yield from (line[line.strip() and env["min_indent"] or 0 :] for line in block)
-            # comment out the last line of code fences
+            yield from self.code_block_body(block, token, env)
             self.get_updated_env(token, env)
+            # comment out the last line of code fences
             yield from self.comment(self.get_block(env, token.map[1]), env)
-            # push token metadata to the parser
-
-    fence_ipython = fence_python
-
-    def format(self, body):
-        """blacken the python"""
-        from black import FileMode, format_str
-
-        return format_str(body, mode=FileMode())
 
     def front_matter(self, token, env):
         """comment, codify, or stringify blocks of front matter"""
         if self.include_front_matter:
-            trail = self._quote_char * 3
+            trail = self.QUOTE
             lead = f"locals().update({self.front_matter_loader}(" + trail
             trail += "))"
             body = self.get_block(env, token.map[1])
@@ -166,15 +157,13 @@ class Python(Renderer):
     def non_code_block_string(self, env, next=None):
         """codify markdown as a block string"""
         body = super().non_code(env, next)
-        lead = trail = self._quote_char * 3
+        lead = trail = self.QUOTE
         indent = self.get_computed_indent(env)
         # add quotes + trailing text on the whole block
         trail += "" if next else ";"
+        continued = env.get("continued") and "\\" or ""
         yield from self.wrap_lines(
-            map(escape, body),
-            lead=SP * indent + lead,
-            trail=trail,
-            continuation=env.get("continued") and "\\" or "",
+            map(escape, body), lead=SP * indent + lead, trail=trail, continuation=continued
         )
 
     def non_code_comment(self, env, next=None):
@@ -197,11 +186,9 @@ class Python(Renderer):
                     yield ws
                 else:
                     for i, l in enumerate(StringIO(ws)):
-                        yield pre
-                        yield l[:-1] + continuation + l[-1]
+                        yield from (pre, l[:-1], continuation, l[-1])
                 yield from (pre, lead, line[:LL])
-                any, ws = True, line[LL:]
-                lead = ""
+                lead, any, ws = "", True, line[LL:]
             else:
                 ws += line
         if any:
