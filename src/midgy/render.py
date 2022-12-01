@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from io import StringIO
 from re import compile
-from textwrap import dedent
 
 __all__ = ()
 
@@ -14,6 +13,7 @@ ESCAPE = {x: "\\" + x for x in "'\""}
 ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
 ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
+SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
 
 
 # the Renderer is special markdown renderer designed to produce
@@ -70,9 +70,7 @@ class Renderer:
         return parser
 
     def code_block(self, token, env):
-        if self.include_indented_code:
-            yield from self.non_code(env, token)
-            yield from self.get_block(env, token.map[1])
+        yield from self.get_block(env, token.map[1])
 
     @classmethod
     def code_from_string(cls, body, **kwargs):
@@ -98,6 +96,14 @@ class Renderer:
         else:
             while env["last_line"] < stop:
                 yield self.readline(env)
+
+    def get_updated_env(self, token, env):
+        """update the state of the environment"""
+        left = token.content.rstrip()
+        continued = left.endswith("\\")
+        env.update(
+            colon_block=left.endswith(":"), quoted_block=left.endswith(QUOTES), continued=continued
+        )
 
     def non_code(self, env, next=None):
         yield from self.get_block(env, next.map[0] if next else None)
@@ -171,7 +177,7 @@ class Renderer:
                 self.print(self.render_token(token, env), target)
         # handle anything left in the buffer
         self.print(self.non_code(env, stop), target)
-        return dedent(target.getvalue())  # return the value of the target, a format string.
+        return target.getvalue()  # return the value of the target, a format string.
 
     def get_initial_env(self, src, tokens):
         """initialize the parser environment

@@ -28,8 +28,10 @@ class Python(Renderer):
 
     def code_block(self, token, env):
         """return raw indent code block"""
-        yield from super().code_block(token, env)
-        self.get_updated_env(token, env)
+        if self.include_indented_code:
+            yield from self.non_code(env, token)
+            yield from (line[env["min_indent"] :] for line in super().code_block(token, env))
+            self.get_updated_env(token, env)
 
     def comment(self, block, indent_or_env):
         """comment a block of code"""
@@ -104,14 +106,6 @@ class Python(Renderer):
         else:
             yield from self.comment(self.get_block(env, token.map[1]), env)
 
-    def get_updated_env(self, token, env):
-        """update the state of the environment"""
-        left = token.content.rstrip()
-        continued = left.endswith("\\")
-        env.update(
-            colon_block=left.endswith(":"), quoted_block=left.endswith(QUOTES), continued=continued
-        )
-
     def get_computed_indent(self, env):
         """compute the indent for the first line of a non-code block."""
         next = env.get("next_code")
@@ -127,7 +121,7 @@ class Python(Renderer):
     def non_code(self, env, next=None):
         """stringify or comment non code blocks"""
         if env.get("quoted_block", False):
-            yield from self.wrap_lines(super().non_code(env, next), pre=SP * env["min_indent"])
+            yield from self.wrap_lines(super().non_code(env, next))
         elif self.include_markdown:
             yield from self.non_code_block_string(env, next)
         else:
@@ -144,7 +138,6 @@ class Python(Renderer):
             map(escape, body),
             lead=SP * indent + lead,
             trail=trail,
-            pre=SP * env["min_indent"],
             continuation=env.get("continued") and "\\" or "",
         )
 
