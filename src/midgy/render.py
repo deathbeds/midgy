@@ -9,11 +9,12 @@ __all__ = ()
 
 DOCTEST_CHAR, CONTINUATION_CHAR, COLON_CHAR, QUOTES_CHARS = 62, 92, 58, {39, 34}
 DOCTEST_CHARS = DOCTEST_CHAR, DOCTEST_CHAR, DOCTEST_CHAR, 32
+BLOCK, FENCE, PYCON = "code_block", "fence", "pycon"
 ESCAPE = {x: "\\" + x for x in "'\""}
 ESCAPE_PATTERN = compile("[" + "".join(ESCAPE) + "]")
 ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 escape = partial(ESCAPE_PATTERN.sub, lambda m: ESCAPE.get(m.group(0)))
-SP, QUOTES = chr(32), ('"' * 3, "'" * 3)
+SP, QUOTES = chr(32), (chr(34) * 3, chr(39) * 3)
 MAGIC = compile("^\s*%{2}\S+")
 
 
@@ -60,9 +61,9 @@ class Renderer:
         parser.block.ruler.disable("code")
         # our indented code captures doctests in indented blocks
         parser.block.ruler.after("doctest", "code", _code_lexer)
-        parser.disable("fence")
+        parser.disable(FENCE)
         # our code fence captures indent information
-        parser.block.ruler.after("code", "fence", code_fence)
+        parser.block.ruler.after("code", FENCE, code_fence)
         # shebang because this markdown is code
         parser.block.ruler.before("table", "shebang", _shebang_lexer)
         parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
@@ -216,16 +217,16 @@ class Renderer:
             yield block, None
 
     def is_code_fence(self, token):
-        return token.type == "fence" and token.type in self.include_code_fences
+        return token.type == FENCE and token.type in self.include_code_fences
 
     def is_code_block(self, token):
         """is the token a code block entry"""
-        if self.include_indented_code and token.type == "code_block":
+        if self.include_indented_code and token.type == BLOCK:
             return True
-        elif token.type == "fence":
+        elif token.type == FENCE:
             if token.info in self.include_code_fences:
                 return True
-            if self.include_doctest and token.info == "pycon":
+            if self.include_doctest and token.info == PYCON:
                 return True
         return False
 
@@ -262,7 +263,7 @@ def _code_lexer(state, start, end, silent=False):
             else:
                 break
         state.line = last_line + 1
-        token = state.push("code_block", "code", 0)
+        token = state.push(BLOCK, "code", 0)
         token.content = state.getLines(start, state.line, 4 + state.blkIndent, True)
         token.map = [start, state.line]
         min_indent = min(
@@ -318,8 +319,8 @@ def _doctest_lexer(state, startLine, end, silent=False):
                 closed = True
                 output = next
         state.line = next
-        token = state.push("fence", "code", 0)
-        token.info = "pycon"
+        token = state.push(FENCE, "code", 0)
+        token.info = PYCON
         token.content = state.getLines(startLine, next, 0, True)
         token.map = [startLine, state.line]
         token.meta.update(

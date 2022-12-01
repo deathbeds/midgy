@@ -3,10 +3,9 @@
 from dataclasses import dataclass, field
 from io import StringIO
 import os
-from .render import Renderer, escape
+from .render import Renderer, escape, MAGIC, FENCE, SP, QUOTES
 
 __all__ = "Python", "md_to_python"
-SP, QUOTES = chr(32), (chr(34) * 3, chr(39) * 3)
 
 
 @dataclass
@@ -31,11 +30,11 @@ class Python(Renderer):
     def is_magic(self, token):
         if self.include_magic and token.meta["magic"]:
             return True
-        return token.type == "fence" and token.info == "ipython"
+        return token.type == FENCE and token.info == "ipython"
 
     def code_block_body(self, block, token, env):
         if self.is_magic(token):
-            yield from self.code_block_magic(block, token, env)
+            yield from self.code_block_magic(block, token.meta["min_indent"], env)
         else:
             yield from self.dedent_block(block, env["min_indent"])
 
@@ -46,19 +45,19 @@ class Python(Renderer):
             yield from self.code_block_body(super().code_block(token, env), token, env)
             self.get_updated_env(token, env)
 
-    def code_block_magic(self, block, token, env, dedent=True):
+    def code_block_magic(self, block, indent, env, dedent=True):
         # split the first line into the program and args
         # wrap the last in blocks quotes
-        line, mindent = next(block), token.meta["min_indent"]
-        program, _, line = line.lstrip().lstrip("%").partition(" ")
+        line = next(block)
+        left = line.rstrip()
+        program, _, args = left.lstrip().lstrip("%").partition(" ")
         # add whitespace relative to the indents allowing for condition magics
         yield SP * self.get_computed_indent(env)
         # prefix the ipython run cell magic caller
-        yield ("get_ipython().run_cell_magic('", program, "', '")
-        left = line.rstrip()
-        yield from (left, "',", line[len(left) :])
+        yield from ("get_ipython().run_cell_magic('", program, "', '")
+        yield from (args, "',", line[len(left) :])
         if dedent:
-            block = self.dedent_block(block, mindent)
+            block = self.dedent_block(block, indent)
         # quote the block of the cell body
         yield from self.wrap_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
 
@@ -86,7 +85,9 @@ class Python(Renderer):
         * output is commented"""
         yield from self.non_code(env, token)
         if token.meta["magic"]:
-            yield from self.code_block_magic(self.doctest_code_input(token, env), token, env, False)
+            yield from self.code_block_magic(
+                self.doctest_code_input(token, env), token.meta["min_indent"], env, False
+            )
         else:
             yield from self.doctest_code_input(token, env)
         if token.meta["output"]:
@@ -143,7 +144,8 @@ class Python(Renderer):
                 spaces = next_indent  # prefer greater trailing indent
             else:
                 spaces += 4  # add post colon default spaces.
-        return max(spaces, env["min_indent"]) - env["min_indent"]
+        min_indent = env.get("min_indent", 0)
+        return max(spaces, min_indent) - min_indent
 
     def non_code(self, env, next=None):
         """stringify or comment non code blocks"""
@@ -169,6 +171,13 @@ class Python(Renderer):
     def non_code_comment(self, env, next=None):
         """comment non code blocks"""
         yield from self.comment(super().non_code(env, next), env)
+
+    def render(self, src):
+        if MAGIC.match(src):
+            from textwrap import dedent
+
+            return "".join(self.code_block_magic(StringIO(dedent(src)), 0, {}))
+        return super().render(src)
 
     def shebang(self, token, env):
         """return the shebang line"""
