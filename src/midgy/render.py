@@ -36,14 +36,11 @@ class Renderer:
     include_doctest: bool = False
     config_key: str = "py"
 
+    def __post_init__(self):
+        self.parser = self.get_parseu()
+
     def asdict(self):
         return {k: getattr(self, k) for k in self.__dataclass_fields__}
-
-    def __post_init__(self):
-        self.parser = self.get_parser()
-
-    def code_block(self, token, env):
-        yield from self.get_block(env, token.map[1])
 
     @classmethod
     def code_from_string(cls, body, **kwargs):
@@ -90,19 +87,16 @@ class Renderer:
             if token.type == "front_matter":
                 from .front_matter import load
 
-                return load(token.content)
+                if "data" in token.meta:
+                    return token.meta["data"]
+                return token.meta.setdefault("data", load(token.content))
             return
 
     def get_initial_env(self, src, tokens):
-        """initialize the parser environment
-
-        peek into the tokens looking for the first code token identified."""
+        """initialize the parser environment indents"""
         env = dict(source=StringIO(src), last_line=0, last_indent=0)
-        for token in tokens:  # iterate through the tokens
-            if self.is_code_block(token):
-                env["min_indent"] = min(
-                    env.setdefault("min_indent", 9999), token.meta["min_indent"]
-                )
+        for token in filter(self.is_code_block, tokens):  # iterate through the tokens
+            env["min_indent"] = min(env.get("min_indent", 9999), token.meta["min_indent"])
         env.setdefault("min_indent", 0)
         return env
 
@@ -115,12 +109,12 @@ class Renderer:
     def get_updated_env(self, token, env, **kwargs):
         """update the state of the environment"""
         left = token.content.rstrip()
-        continued = left.endswith("\\")
-        colon_block = left.endswith(":")
-        quoted_block = left.endswith(QUOTES)
         env.update(
-            colon_block=colon_block, quoted_block=quoted_block, continued=continued, **kwargs
+            continued=left.endswith("\\"),
+            colon_block=left.endswith(":"),
+            quoted_block=left.endswith(QUOTES),
         )
+        env.update(kwargs)
 
     def is_code_block(self, token):
         """is the token a code block entry"""

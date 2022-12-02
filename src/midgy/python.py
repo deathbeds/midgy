@@ -1,10 +1,8 @@
 """the Python class that translates markdown to python code"""
-
 from dataclasses import dataclass, field
 from io import StringIO
 from .render import Renderer, escape, FENCE, SP, QUOTES
 from .lexers import MAGIC
-
 
 __all__ = "Python", "md_to_python"
 
@@ -34,7 +32,7 @@ class Python(Renderer):
                 yield from self.code_block_doctest(token, env)
         elif self.include_indented_code:
             yield from self.non_code(env, token)
-            yield from self.code_block_body(super().code_block(token, env), token, env)
+            yield from self.code_block_body(self.get_block(env, token.map[1]), token, env)
             self.get_updated_env(token, env)
 
     def code_block_body(self, block, token, env):
@@ -42,19 +40,16 @@ class Python(Renderer):
             block = self.get_block_sans_doctest(block)
         if self.is_magic(token):
             block = self.code_block_magic(block, token.meta["min_indent"], env)
-        indent = (not token.meta["is_magic"]) * env["min_indent"]
-        yield from self.dedent_block(block, indent)
+        yield from self.dedent_block(block, (not token.meta["is_magic"]) * env["min_indent"])
 
     def code_block_doctest(self, token, env):
         yield from self.non_code(env, token)
-        block = self.get_block(env, token.meta["input"][1])
-        yield from self.code_block_body(block, token, env)
+        yield from self.code_block_body(self.get_block(env, token.meta["input"][1]), token, env)
         if token.meta["output"]:
             block = self.get_block(env, token.meta["output"][1])
             block = self.dedent_block(block, token.meta["min_indent"])
             yield from self.comment(block, env)
-        self.get_updated_env(token, env)
-        env.update(colon_block=False, quoted_block=False, continued=False)
+        self.get_updated_env(token, env, colon_block=False, quoted_block=False, continued=False)
 
     def code_block_magic(self, block, indent, env, dedent=True):
         line = next(block)
@@ -69,17 +64,16 @@ class Python(Renderer):
         if dedent:
             block = self.dedent_block(block, indent)
         # quote the block of the cell body
-        yield from self.wrap_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
+        yield from self.get_wrapped_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
 
     def comment(self, block, env):
-        yield from self.wrap_lines(block, pre=SP * self.get_computed_indent(env) + "# ")
+        yield from self.get_wrapped_lines(block, pre=SP * self.get_computed_indent(env) + "# ")
 
     def dedent_block(self, block, dedent):
         yield from (x[dedent:] for x in block)
 
     def fence_python(self, token, env):
         """return a modified code fence that identifies as code"""
-
         if token.info in self.include_code_fences:
             yield from self.non_code(env, token)
             yield from self.comment(self.get_block(env, token.map[0] + 1), env)
@@ -96,7 +90,7 @@ class Python(Renderer):
             lead = f"locals().update({self.front_matter_loader}(" + self.QUOTE
             trail = self.QUOTE + "))"
             body = self.get_block(env, token.map[1])
-            yield from self.wrap_lines(body, lead=lead, trail=trail)
+            yield from self.get_wrapped_lines(body, lead=lead, trail=trail)
         else:
             yield from self.comment(self.get_block(env, token.map[1]), env)
 
@@ -128,7 +122,7 @@ class Python(Renderer):
     def non_code(self, env, next=None):
         """stringify or comment non code blocks"""
         if env.get("quoted_block", False):
-            yield from self.wrap_lines(super().non_code(env, next))
+            yield from self.get_wrapped_lines(super().non_code(env, next))
         elif self.include_markdown:
             yield from self.non_code_block_string(env, next)
         else:
@@ -142,7 +136,7 @@ class Python(Renderer):
         # add quotes + trailing text on the whole block
         trail += "" if next else ";"
         continued = env.get("continued") and "\\" or ""
-        yield from self.wrap_lines(
+        yield from self.get_wrapped_lines(
             map(escape, body), lead=SP * indent + lead, trail=trail, continuation=continued
         )
 
@@ -156,7 +150,7 @@ class Python(Renderer):
     def shebang(self, token, env):
         yield from self.get_block(env, token.map[1])
 
-    def wrap_lines(self, lines, lead="", pre="", trail="", continuation=""):
+    def get_wrapped_lines(self, lines, lead="", pre="", trail="", continuation=""):
         """a utility function to manipulate a buffer of content line-by-line."""
         ws, any, continued = "", False, False
         for line in lines:
