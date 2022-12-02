@@ -36,6 +36,9 @@ class Renderer:
     include_doctest: bool = False
     config_key: str = "py"
 
+    def asdict(self):
+        return {k: getattr(self, k) for k in self.__dataclass_fields__}
+
     def __post_init__(self):
         self.parser = self.get_parser()
 
@@ -121,10 +124,10 @@ class Renderer:
 
     def is_code_block(self, token):
         """is the token a code block entry"""
-        if self.include_indented_code and token.type == BLOCK:
+        if token.type == BLOCK:
             if token.meta["is_doctest"]:
                 return self.include_doctest
-            return True
+            return self.include_indented_code
         elif token.type == FENCE:
             if token.info in self.include_code_fences:
                 return True
@@ -199,7 +202,8 @@ class Renderer:
         front_matter = self.get_front_matter(tokens)
         if front_matter:
             # front matter can reconfigure the parser and make a new one
-            config = front_matter.get(self.config_key, None)
+            config = self.asdict()
+            config.update(front_matter.get(self.config_key, {}))
             if config:
                 return type(self)(**config)
         return self

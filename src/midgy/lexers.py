@@ -1,9 +1,11 @@
 from re import compile
+
 BLOCK, FENCE, PYCON = "code_block", "fence", "pycon"
 DOCTEST_CHARS = 62, 62, 62, 32  # >>>S
 ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
 MAGIC_CHARS = (37, 37)  # %%
-MAGIC= compile("^\s*%{2}\S+")
+MAGIC = compile("^\s*%{2}\S+")
+
 
 def code_lexer(state, start, end, silent=False):
     """a code lexer that tracks indents in the token and is aware of doctests"""
@@ -88,7 +90,7 @@ def doctest_lexer(state, startLine, end, silent=False):
             is_magic=bool(MAGIC.match(token.content.lstrip().lstrip(">").lstrip())),
             is_doctest=True,
             input=[lead, extra],
-            output=[extra, output] if extra < output else None
+            output=[extra, output] if extra < output else None,
         )
         return True
     return False
@@ -107,6 +109,7 @@ def code_fence_lexer(state, *args, **kwargs):
                 first_indent = state.sCount[next]
             last_indent = state.sCount[next]
         min_indent = min([state.sCount[i] for i in extent if not state.isEmpty(i)] or [0])
+
         token.meta.update(
             first_indent=first_indent or 0,
             last_indent=last_indent,
