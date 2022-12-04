@@ -4,8 +4,6 @@ from io import StringIO
 from .render import Renderer, escape, FENCE, SP, QUOTES
 from .lexers import MAGIC
 
-__all__ = "Python", "md_to_python"
-
 
 @dataclass
 class Python(Renderer):
@@ -94,6 +92,13 @@ class Python(Renderer):
         else:
             yield from self.comment(self.get_block(env, token.map[1]), env)
 
+    def get_block_sans_doctest(self, block):
+        for line in block:
+            right = line.lstrip()
+            if right:
+                line = line[: len(line) - len(right)] + right[4:]
+            yield line
+
     def get_computed_indent(self, env):
         """compute the indent for the first line of a non-code block."""
         next = env.get("next_code")
@@ -107,51 +112,9 @@ class Python(Renderer):
         min_indent = env.get("min_indent", 0)
         return max(spaces, min_indent) - min_indent
 
-    def get_block_sans_doctest(self, block):
-        for line in block:
-            right = line.lstrip()
-            if right:
-                line = line[: len(line) - len(right)] + right[4:]
-            yield line
-
-    def is_magic(self, token):
-        if self.include_magic and token.meta["is_magic"]:
-            return True
-        return token.type == FENCE and token.info == "ipython"
-
-    def non_code(self, env, next=None):
-        """stringify or comment non code blocks"""
-        if env.get("quoted_block", False):
-            yield from self.get_wrapped_lines(super().non_code(env, next))
-        elif self.include_markdown:
-            yield from self.non_code_block_string(env, next)
-        else:
-            yield from self.comment(super().non_code(env, next), env)
-
-    def non_code_block_string(self, env, next=None):
-        """codify markdown as a block string"""
-        body = super().non_code(env, next)
-        lead = trail = self.QUOTE
-        indent = self.get_computed_indent(env)
-        # add quotes + trailing text on the whole block
-        trail += "" if next else ";"
-        continued = env.get("continued") and "\\" or ""
-        yield from self.get_wrapped_lines(
-            map(escape, body), lead=SP * indent + lead, trail=trail, continuation=continued
-        )
-
-    def render(self, src):
-        if MAGIC.match(src):
-            from textwrap import dedent
-
-            return "".join(self.code_block_magic(StringIO(dedent(src)), 0, {}))
-        return super().render(src)
-
-    def shebang(self, token, env):
-        yield from self.get_block(env, token.map[1])
-
     def get_wrapped_lines(self, lines, lead="", pre="", trail="", continuation=""):
         """a utility function to manipulate a buffer of content line-by-line."""
+        # can do this better with buffers
         ws, any, continued = "", False, False
         for line in lines:
             LL = len(line.rstrip())
@@ -175,5 +138,30 @@ class Python(Renderer):
         else:
             yield ws
 
+    def is_magic(self, token):
+        if self.include_magic and token.meta["is_magic"]:
+            return True
+        return token.type == FENCE and token.info == "ipython"
 
-tangle = md_to_python = Python.code_from_string
+    def non_code(self, env, next=None):
+        block = super().non_code(env, next)
+        if self.include_markdown:
+            lead = trail = "" if env.get("quoted_block", False) else self.QUOTE
+            lead = SP * self.get_computed_indent(env) + lead
+            trail += "" if next else ";"
+            continued = env.get("continued") and "\\" or ""
+            yield from self.get_wrapped_lines(
+                map(escape, block), lead=lead, trail=trail, continuation=continued
+            )
+        else:
+            yield from self.comment(block, env)
+
+    def render(self, src):
+        if MAGIC.match(src):
+            from textwrap import dedent
+
+            return "".join(self.code_block_magic(StringIO(dedent(src)), 0, {}))
+        return super().render(src)
+
+    def shebang(self, token, env):
+        yield from self.get_block(env, token.map[1])

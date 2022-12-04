@@ -37,10 +37,7 @@ class Renderer:
     config_key: str = "py"
 
     def __post_init__(self):
-        self.parser = self.get_parseu()
-
-    def asdict(self):
-        return {k: getattr(self, k) for k in self.__dataclass_fields__}
+        self.parser = self.get_parser()
 
     @classmethod
     def code_from_string(cls, body, **kwargs):
@@ -196,7 +193,7 @@ class Renderer:
         front_matter = self.get_front_matter(tokens)
         if front_matter:
             # front matter can reconfigure the parser and make a new one
-            config = self.asdict()
+            config = {k: getattr(self, k) for k in self.__dataclass_fields__}
             config.update(front_matter.get(self.config_key, {}))
             if config:
                 return type(self)(**config)
