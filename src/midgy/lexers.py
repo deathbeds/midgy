@@ -114,6 +114,7 @@ def code_fence_lexer(state, *args, **kwargs):
             first_indent=first_indent or 0,
             last_indent=last_indent,
             min_indent=min_indent,
+            is_magic_info=bool(MAGIC.match(token.info)),
             is_magic=bool(MAGIC.match(token.content)),
             is_doctest=token.info == PYCON,
         )
