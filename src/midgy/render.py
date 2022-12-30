@@ -44,14 +44,6 @@ class Renderer:
         """render a string"""
         return cls(**kwargs).render(body)
 
-    def fence(self, token, env):
-        """the fence renderer is pluggable.
-
-        if token_{token.info} exists then that method is called to render the token"""
-        method = getattr(self, f"fence_{token.info}", None)
-        if method:
-            return method(token, env)
-
     def get_block(self, env, stop=None):
         """iterate through the lines in a buffer"""
         if stop is None:
@@ -163,10 +155,6 @@ class Renderer:
             prior_token and block.insert(0, prior_token)
             yield self.render_tokens(block, env=env, stop=next_token)
             prior, prior_token = env, next_token
-
-    def render_lines(self, src):
-        # use py the ipython transformer
-        return self.render("".join(src)).splitlines(True)
 
     def render_token(self, token, env):
         if token:

@@ -70,6 +70,38 @@ class Python(Renderer):
     def dedent_block(self, block, dedent):
         yield from (x[dedent:] for x in block)
 
+    def fence(self, token, env):
+        """the fence renderer is pluggable.
+
+        if token_{token.info} exists then that method is called to render the token"""
+
+        if token.info:
+            method = getattr(self, f"fence_{token.info}", None)
+            if method:
+                return method(token, env)
+            
+            if token.meta["is_magic_info"]:
+                return self._fence_info_magic(token, env)
+
+    def _fence_info_magic(self, token, env):
+        """return a modified code fence that identifies as code"""
+
+        yield from self.non_code(env, token)
+        line = next(self.get_block(env, token.map[0]+1))
+        left = line.rstrip()
+        right = left.lstrip()
+        markup = right[0]
+        program, _, args = right.lstrip("`~").lstrip("%").partition(" ")
+        yield from ("get_ipython().run_cell_magic('", program, "', '")
+        yield from (args, "', # ", markup * 3 , line[len(left) :])
+
+        block = self.get_block(env, token.map[1] - 1)
+        block = self.dedent_block(block, token.meta["min_indent"])       
+        yield from self.get_wrapped_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
+
+        self.get_updated_env(token, env)
+        yield from self.comment(self.get_block(env, token.map[1]), env)
+
     def fence_python(self, token, env):
         """return a modified code fence that identifies as code"""
         if token.info in self.include_code_fences:
