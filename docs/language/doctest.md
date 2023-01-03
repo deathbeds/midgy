@@ -1,49 +1,62 @@
++++
+py.include_doctest = true
+py.include_indented_code = false
++++
+
 # doctest
 
-*******************************************************
-
-by default doctests are not included in code.
-
-```markdown
->>> this is a blockquote
-... with a trailing paragraph
-and is not a doctest
-
-    >>> assert 'this is a doctest\
-    ... because it is indented'
-```
-
-```python
-""">>> this is a blockquote
-... with a trailing paragraph
-and is not a doctest
-
-    >>> assert \'this is a doctest\
-    ... because it is indented\'""";
-```
 
 *******************************************************
 
 `include_doctest` flag includes doctest inputs in code
 
 ```markdown
-+++
-[py]
-include_doctest = true
-include_front_matter = false
-+++
-
     >>> print("a doctest")
+    a doctest
 ```
 
 ```python
-# +++
-# [py]
-# include_doctest = true
-# include_front_matter = false
-# +++
+print("a doctest")
+# a doctest
+```
+*******************************************************
+
+doctests can contain magics
+
+```markdown
+    >>> %%python
+    ... print("a doctest")
+    a doctest
+```
+
+```python
+get_ipython().run_cell_magic('python', '',
+"""print("a doctest")""")
+# a doctest
+```
+
+*******************************************************
+
+doctests can contain magics
+
+```markdown
++++
+py.include_indented_code = true
++++
+    "normal code and doctest code are separated"
+
+    >>> print("a doctest")
+    a doctest
+```
+
+```python
+locals().update(__import__("midgy").front_matter.load("""+++
+py.include_indented_code = true
++++"""))
+"normal code and doctest code are separated"
 
 print("a doctest")
+# a doctest
 ```
 
 ----------------------------------------------------------

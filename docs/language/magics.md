@@ -73,3 +73,5 @@ get_ipython().run_cell_magic('magic', 'arguments', # ```
 """the body""") 
 # ```
 ````
+
+this form is not friendly in native markdown mode
