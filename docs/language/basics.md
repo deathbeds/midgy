@@ -204,7 +204,7 @@ line continuations connect code to lines to markdown lines
 
 ```markdown
             foo =\
-            \
+
 line continuations assign this string to `foo`
 ```
 
@@ -260,7 +260,7 @@ requests.get(
 as parameters, markdown blocks can be manipulated with python
 
 ```markdown
-    urls = [ url.lstrip("*").lstrip() for url in 
+    urls = [url.lstrip("*").lstrip() for url in 
 * https://api.github.com
 * https://google.com
 
@@ -273,4 +273,26 @@ urls = [url.lstrip("*").lstrip() for url in
 * https://google.com"""
 
     .splitlines()]
+```
+
+*******************************************************
+
+by default doctests are not included in code.
+
+```markdown
+>>> this is a blockquote
+... with a trailing paragraph
+and is not a doctest
+
+    >>> assert 'this is a doctest\
+    ... because it is indented'
+```
+
+```python
+""">>> this is a blockquote
+... with a trailing paragraph
+and is not a doctest
+
+    >>> assert \'this is a doctest\
+    ... because it is indented\'""";
 ```

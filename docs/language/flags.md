@@ -26,6 +26,25 @@ py.include_indented_code = false
 """    ignored""";
 ```
 
+
+*******************************************************
+
+markdown code can be ignored
+
+```markdown
++++
+py.include_markdown = false
++++
+ignored
+```
+
+```python
+locals().update(__import__("midgy").front_matter.load("""+++
+py.include_markdown = false
++++"""))
+# ignored
+```
+
 *******************************************************
 
 front matter code can be ignored
