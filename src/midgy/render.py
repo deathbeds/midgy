@@ -31,6 +31,7 @@ class Renderer:
 
     parser: object = None
     cell_hr_length: int = 9
+    include_code: bool = True # the nuclear option
     include_code_fences: set = field(default_factory=set)
     include_indented_code: bool = True
     include_doctest: bool = False
@@ -107,15 +108,16 @@ class Renderer:
 
     def is_code_block(self, token):
         """is the token a code block entry"""
-        if token.type == BLOCK:
-            if token.meta["is_doctest"]:
-                return self.include_doctest
-            return self.include_indented_code
-        elif token.type == FENCE:
-            if token.info in self.include_code_fences:
-                return True
-            if token.info == PYCON:
-                return self.include_doctest
+        if self.include_code:
+            if token.type == BLOCK:
+                if token.meta["is_doctest"]:
+                    return self.include_doctest
+                return self.include_indented_code
+            elif token.type == FENCE:
+                if token.info in self.include_code_fences:
+                    return True
+                if token.info == PYCON:
+                    return self.include_doctest
         return False
 
     def non_code(self, env, next=None):

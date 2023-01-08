@@ -1,9 +1,12 @@
 """the Python class that translates markdown to python code"""
 from dataclasses import dataclass, field
 from io import StringIO
+from copy import copy
+from functools import partial
 from .render import Renderer, escape, FENCE, SP, QUOTES
 from .lexers import MAGIC
-
+from typing import Tuple
+DEFAULT_FENCE_LANGS = "python", "ipython"
 
 @dataclass
 class Python(Renderer):
@@ -18,7 +21,7 @@ class Python(Renderer):
     # include markdown in that code as strings, (False) uses comments
     include_markdown: bool = True
     # code fence languages that indicate a code block
-    include_code_fences: list = field(default_factory=["python", "ipython"].copy)
+    include_code_fences: Tuple[str] = field(default_factory=partial(copy, DEFAULT_FENCE_LANGS))
     include_magic: bool = True
 
     front_matter_loader = '__import__("midgy").front_matter.load'
@@ -82,6 +85,8 @@ class Python(Renderer):
             
             if token.meta["is_magic_info"]:
                 return self._fence_info_magic(token, env)
+
+    # def _flush_magic(self):
 
     def _fence_info_magic(self, token, env):
         """return a modified code fence that identifies as code"""
