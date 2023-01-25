@@ -53,4 +53,22 @@ another way to measure pythons impact is using the TIOBE scale. this scale measu
 
 ### jupyter notebooks
 
-## choice of markup language
+## choice of markup language and implementation
+
+the __[tokenization]__ step reuses machinery from the [`markdown_it`] project. this library was chosen because amongst other markdown parsers (eg. [`mistune`], [`mistletoe`], [`python-markdown`]) it is the only one to return line numbers. 
+
+[`markdown_it`] it is a port of the popular [markdown it javascript library]. it appears reliable for the `parser` and `tokens` because: 
+* it is not innovating independently so we should expect a fairly stable api.
+* the plugin interface makes it possible to extend the markdown parser in consistent ways as we do for the `code_lexer`, `doctest_lexer` and `front_matter` lexer.
+* further, [`markdown_it`] has [strong adoption](https://pypistats.org/packages/markdown-it-py) specifically through documentation in `jupyter_book` and linting with `mdformat`. 
+
+
+    
+
+[tokenization]: https://en.wikipedia.org/wiki/Lexical_analysis#Tokenization
+[`markdown_it`]: https://github.com/executablebooks/markdown-it-py
+[markdown it javascript library]: https://github.com/markdown-it/markdown-it
+[`mistune`]: https://pypi.org/project/mistune/
+[`mistletoe`]: https://pypi.org/project/mistletoe/
+[`python-markdown`]: https://pypi.org/project/markdown/
+[`jupyter_book`]: https://pypi.org/project/jupyter-book/

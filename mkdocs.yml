@@ -12,13 +12,9 @@ plugins:
   - search
 
 nav:
-  -   literate programming:
+  - midgy literate programming: 
       - midgy literate programming: README.md
-  - the midgy library: 
       - midgy usage: midgy.md
-      - translation:
-        - markdown tokenization: tokenization.md
-        - python rendering: rendering.md
   - the midgy language:
       - about the language: language/README.md
       - midgy basics: language/basics.md
@@ -27,7 +23,12 @@ nav:
       - front matter: language/front_matter.md
       - line continuations: language/line_continuations.md
       - rendering flags: language/flags.md
+      - IPython magics: language/magics.md
+      - IPython magics: language/container_blocks.md
+      - mixed code tokens: language/mixed.md
   - the midgy design: design.md
+  - sample programs:
+    - typer applications with midgy: programs/command-line-with-typer.md
 
 markdown_extensions:
   - admonition

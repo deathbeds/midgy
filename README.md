@@ -1,6 +1,6 @@
 # `midgy`
 
-`midgy` makes markdown python modules and scripts.
+`midgy` transforms markdown to python modules and scripts.
 
 ### command line interface
 
