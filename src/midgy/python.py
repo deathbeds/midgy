@@ -40,7 +40,7 @@ class Python(Renderer):
         if token.meta["is_doctest"]:
             block = self.get_block_sans_doctest(block)
         if self.is_magic(token):
-            block = self.code_block_magic(block, token.meta["min_indent"], env)
+            block = self.code_block_magic(block, self.get_computed_indent(env), env)
         yield from self.dedent_block(block, (not token.meta["is_magic"]) * env["min_indent"])
 
     def code_block_doctest(self, token, env):
@@ -86,7 +86,6 @@ class Python(Renderer):
             if token.meta["is_magic_info"]:
                 return self._fence_info_magic(token, env)
 
-    # def _flush_magic(self):
 
     def _fence_info_magic(self, token, env):
         """return a modified code fence that identifies as code"""
