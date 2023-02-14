@@ -36,6 +36,7 @@ class Renderer:
     include_indented_code: bool = True
     include_doctest: bool = False
     config_key: str = "py"
+    env: dict = None
 
     def __post_init__(self):
         self.parser = self.get_parser()
@@ -84,7 +85,7 @@ class Renderer:
 
     def get_initial_env(self, src, tokens):
         """initialize the parser environment indents"""
-        env = dict(**self.env, source=StringIO(src), last_line=0, last_indent=0)
+        env = dict(**self.env or dict(), source=StringIO(src), last_line=0, last_indent=0)
         for token in filter(self.is_code_block, tokens):  # iterate through the tokens
             env["min_indent"] = min(env.get("min_indent", 9999), token.meta["min_indent"])
         env.setdefault("min_indent", 0)
