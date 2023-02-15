@@ -6,7 +6,9 @@ from functools import partial
 from .render import Renderer, escape, FENCE, SP, QUOTES
 from .lexers import MAGIC
 from typing import Tuple
+
 DEFAULT_FENCE_LANGS = "python", "ipython"
+
 
 @dataclass
 class Python(Renderer):
@@ -63,7 +65,7 @@ class Python(Renderer):
         yield from ("get_ipython().run_cell_magic('", program, "', '")
         yield from (args, "',", line[len(left) :])
         if dedent:
-            block = self.dedent_block(block, indent)
+            block = self.dedent_block(block, indent + env.get("min_indent", 0))
         # quote the block of the cell body
         yield from self.get_wrapped_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
 
@@ -82,25 +84,24 @@ class Python(Renderer):
             method = getattr(self, f"fence_{token.info}", None)
             if method:
                 return method(token, env)
-            
+
             if token.meta["is_magic_info"]:
                 return self._fence_info_magic(token, env)
-
 
     def _fence_info_magic(self, token, env):
         """return a modified code fence that identifies as code"""
 
         yield from self.non_code(env, token)
-        line = next(self.get_block(env, token.map[0]+1))
+        line = next(self.get_block(env, token.map[0] + 1))
         left = line.rstrip()
         right = left.lstrip()
         markup = right[0]
         program, _, args = right.lstrip("`~").lstrip("%").partition(" ")
         yield from ("get_ipython().run_cell_magic('", program, "', '")
-        yield from (args, "', # ", markup * 3 , line[len(left) :])
+        yield from (args, "', # ", markup * 3, line[len(left) :])
 
         block = self.get_block(env, token.map[1] - 1)
-        block = self.dedent_block(block, token.meta["min_indent"])       
+        block = self.dedent_block(block, token.meta["min_indent"])
         yield from self.get_wrapped_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
 
         self.get_updated_env(token, env)
