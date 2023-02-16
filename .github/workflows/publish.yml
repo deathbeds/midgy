@@ -1,0 +1,35 @@
+name: build docs
+on: 
+- push 
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: install
+        run: pip install --upgrade pip hatch
+      - name: build mkdocs
+        run: hatch run docs:build
+      # - name: build jupyterlite
+      #   run: hatch run lite:build
+      - name: Deploy main 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        if: ${{ github.ref_name == 'main' }}
+        with:
+          folder: site # The folder the action should deploy.
+          force: false
+      - name: Deploy non-main 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        if: ${{ github.ref_name != 'main' }}
+        with:
+          folder: site # The folder the action should deploy.
+          force: false
+          target-folder: branch/${{ github.ref_name }}
