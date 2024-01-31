@@ -20,7 +20,7 @@ def code_lexer(state, start, end, silent=False):
                 begin = state.bMarks[next] + state.tShift[next]
                 if is_magic is None:
                     is_magic = state.srcCharCode[begin : begin + 2] == MAGIC_CHARS
-                if not is_magic and state.srcCharCode[begin : begin + 4] == DOCTEST_CHARS:
+                elif  state.srcCharCode[begin : begin + 4] == DOCTEST_CHARS:
                     break
                 if not first_indent:
                     first_indent = state.sCount[next]
@@ -39,6 +39,7 @@ def code_lexer(state, start, end, silent=False):
             min_indent=min_indent,
             is_magic=is_magic,
             is_doctest=False,
+            **content_state(token)
         )
         return True
     return False
@@ -96,6 +97,15 @@ def doctest_lexer(state, startLine, end, silent=False):
     return False
 
 
+def content_state(token):
+        left = token.content.rstrip()
+        continued = left.endswith("\\")
+        if continued:
+            left = left[:-1]
+        indented = left.endswith(":")
+        return dict(is_indented=indented, is_continued=continued)
+
+
 def code_fence_lexer(state, *args, **kwargs):
     from markdown_it.rules_block.fence import fence
 
@@ -105,11 +115,11 @@ def code_fence_lexer(state, *args, **kwargs):
         first_indent, last_indent = None, 0
         extent = range(token.map[0] + 1, token.map[1] - 1)
         for next in extent:
-            if first_indent is None:
+            if next and first_indent is None:
                 first_indent = state.sCount[next]
-            last_indent = state.sCount[next]
-        min_indent = min([state.sCount[i] for i in extent if not state.isEmpty(i)] or [0])
-
+            if next  < (extent.stop - 1):
+                last_indent = state.sCount[next]
+        min_indent = min([state.sCount[i] for i in extent if not state.isEmpty(i)] or [0])        
         token.meta.update(
             first_indent=first_indent or 0,
             last_indent=last_indent,
@@ -117,5 +127,6 @@ def code_fence_lexer(state, *args, **kwargs):
             is_magic_info=bool(MAGIC.match(token.info)),
             is_magic=bool(MAGIC.match(token.content)),
             is_doctest=token.info == PYCON,
+            **content_state(token)
         )
     return result

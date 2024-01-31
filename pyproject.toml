@@ -2,6 +2,17 @@
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
+[project.entry-points.midgy]
+md = "midgy.tangle:Markdown"
+markdown = "midgy.tangle:Markdown"
+py = "midgy.language.python:Python"
+python = "midgy.language.python:Python"
+# yml = "midgy.language.yaml:Yml"
+# yaml = "midgy.language.yaml:Yaml"
+# js = "midgy.language.js:Js"
+# javascript = "midgy.language.js:Js"
+# toml = "midgy.language.toml:Toml"
+
 [tool.hatch.build.targets.sdist]
 [tool.hatch.build.targets.wheel]
 
@@ -98,4 +109,9 @@ black .
 
 [tool.doit]
 verbosity = 2
+loader = "doitoml"
 backend = "json"
+
+[tool.doitoml.tasks.dev]
+doc = "install midgy (and eventually pidgy in dev mode)"
+actions = ["pip install -e."]

@@ -34,7 +34,7 @@ class Python(Renderer):
             if self.include_doctest:
                 yield from self.code_block_doctest(token, env)
         elif self.include_indented_code:
-            yield from self.non_code(env, token)
+            yield from self.noncode(env, token)
             yield from self.code_block_body(self.get_block(env, token.map[1]), token, env)
             self.get_updated_env(token, env)
 
@@ -46,7 +46,7 @@ class Python(Renderer):
         yield from self.dedent_block(block, (not token.meta["is_magic"]) * env["min_indent"])
 
     def code_block_doctest(self, token, env):
-        yield from self.non_code(env, token)
+        yield from self.noncode(env, token)
         yield from self.code_block_body(self.get_block(env, token.meta["input"][1]), token, env)
         if token.meta["output"]:
             block = self.get_block(env, token.meta["output"][1])
@@ -91,7 +91,7 @@ class Python(Renderer):
     def _fence_info_magic(self, token, env):
         """return a modified code fence that identifies as code"""
 
-        yield from self.non_code(env, token)
+        yield from self.noncode(env, token)
         line = next(self.get_block(env, token.map[0] + 1))
         left = line.rstrip()
         right = left.lstrip()
@@ -110,7 +110,7 @@ class Python(Renderer):
     def fence_python(self, token, env):
         """return a modified code fence that identifies as code"""
         if token.info in self.include_code_fences:
-            yield from self.non_code(env, token)
+            yield from self.noncode(env, token)
             yield from self.comment(self.get_block(env, token.map[0] + 1), env)
             block = self.get_block(env, token.map[1] - 1)
             yield from self.code_block_body(block, token, env)
@@ -169,9 +169,9 @@ class Python(Renderer):
                 ws += line
         if any:
             yield trail
-        if continued:
-            for i, line in enumerate(StringIO(ws)):
-                yield from (i and pre or "", line[:-1], i and "\\" or "", line[-1])
+        # if continued:
+        #     for i, line in enumerate(StringIO(ws)):
+        #         yield from (i and pre or "", line[:-1], i and "\\" or "", line[-1])
         else:
             yield ws
 
@@ -180,18 +180,24 @@ class Python(Renderer):
             return True
         return token.type == FENCE and token.info == "ipython"
 
-    def non_code(self, env, next=None):
-        block = super().non_code(env, next)
+    def noncode(self, env, next=None):
+        block = super().noncode(env, next)
         if self.include_markdown:
             lead = trail = "" if env.get("quoted_block", False) else self.QUOTE
             lead = SP * self.get_computed_indent(env) + lead
             trail += "" if next else ";"
-            continued = env.get("continued") and "\\" or ""
+            # continued = env.get("continued") and "\\" or ""
             yield from self.get_wrapped_lines(
-                map(escape, block), lead=lead, trail=trail, continuation=continued
+                map(escape, block), lead=lead, trail=trail#, continuation=continued
             )
         else:
             yield from self.comment(block, env)
+
+    def noncode_comment(self, env, next=None):
+        pass
+
+    def noncodestring(self, env, next=None):
+        pass
 
     def render(self, src):
         if MAGIC.match(src):

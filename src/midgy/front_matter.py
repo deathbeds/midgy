@@ -5,12 +5,27 @@ __all__ = ("load",)
 SHEBANG = compile("^#!\s*(?P<interpreter>\S+)\s*(?P<command>.*)")
 
 
-FM = Enum("FM", {"yaml": "-", "toml": "+"})
+FM = Enum("FM", {"-": "yaml", "+": "toml"})
+
+
+def get_ini(data):
+    from configparser import ConfigParser
+
+    parser = ConfigParser()
+    parser.read_string(data)
+    return parser._sections
 
 
 def strip_and_classifiy(x):
     x = x.strip()
     return FM(x[0]), "".join(x.splitlines(True)[1:-1])
+
+
+def get_loader(markup):
+    """load front matter including the delimiters.
+
+    --- and +++ reference yaml and toml front matter respectively."""
+    return {FM.toml: load_toml, FM.yaml: load_yaml}[markup[0]]
 
 
 def load(x):
@@ -155,5 +170,7 @@ def _front_matter_lexer(state, startLine, endLine, silent):
     state.lineMax = line_max
     state.line = nextLine
     token.map = [startLine, state.line]
+    token.meta.update(min_indent=0)
+    token.info = FM[token.markup].value
 
     return True

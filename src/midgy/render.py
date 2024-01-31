@@ -37,6 +37,8 @@ class Renderer:
     include_doctest: bool = False
     config_key: str = "py"
     env: dict = None
+    INDENT_TOKEN = ":"
+    CONTINUE_TOKEN = "\\"
 
     def __post_init__(self):
         self.parser = self.get_parser()
@@ -102,7 +104,9 @@ class Renderer:
         left = token.content.rstrip()
         env.update(
             continued=left.endswith("\\"),
+            continue_token=left.endswith(self.CONTINUE_TOKEN),
             colon_block=left.endswith(":"),
+            indent_next_block=left.endswith(self.INDENT_TOKEN),
             quoted_block=left.endswith(QUOTES),
         )
         env.update(kwargs)
@@ -115,13 +119,12 @@ class Renderer:
                     return self.include_doctest
                 return self.include_indented_code
             elif token.type == FENCE:
-                if token.info in self.include_code_fences:
-                    return True
                 if token.info == PYCON:
                     return self.include_doctest
+                return True
         return False
 
-    def non_code(self, env, next=None):
+    def noncode(self, env, next=None):
         yield from self.get_block(env, next.map[0] if next else None)
         if next:
             env.update(last_indent=next.meta.get("last_indent", 0))
@@ -177,7 +180,7 @@ class Renderer:
                 env["next_code"] = token
             self.print(self.render_token(token, env), target)
         # handle anything left in the buffer
-        self.print(self.non_code(env, stop), target)
+        self.print(self.noncode(env, stop), target)
         return target.getvalue()  # return the value of the target, a format string.
 
     def renderer_from_tokens(self, tokens):
