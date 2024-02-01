@@ -297,15 +297,17 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
                 body = body[:-1]
             # place tight quote before the block string body
             yield SP * self.get_indent(env)
-            if paren and self.include_quote_parenthesis:
-                yield "( "
-            yield self.STRING_MARKER[0]
+            if not env.get("quoted"):
+                if paren and self.include_quote_parenthesis:
+                    yield "( "
+                yield self.STRING_MARKER[0]
         yield from StringIO(body)
         if body:
             # place tight quote after the block string body
-            yield self.STRING_MARKER[1]
-            if paren and self.include_quote_parenthesis:
-                yield ")"
+            if not env.get("quoted"):
+                yield self.STRING_MARKER[1]
+                if paren and self.include_quote_parenthesis:
+                    yield ")"
             if next is None:
                 yield ";"
         for line in StringIO(block[end:]):
@@ -317,6 +319,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         return self.render("".join(source)).splitlines(True)
 
     def update_env(self, token, env, **kwargs):
+        env["quoted"] = token.meta.get("is_quoted")
         env["continued"] = token.meta.get("is_continued")
         env["indented"] = token.meta.get("is_indented")
         env["last_indent"] = token.meta.get("last_indent")
