@@ -178,8 +178,18 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         # close the fence group and comment out the last fence dashes
         # this syntax restricuts from using line continuations like indented code blocks
         # if the comment were dropped then we could use continuations
-        yield ") # "
-        yield from self.generate_block_lines(env, token.map[1])
+        yield ")"
+        yield " # "
+        rest = self.generate_block_lines(env, token.map[1])
+        if token.meta["next_code"] is None:
+            last = next(rest)
+            yield last[:-1]
+            # ipython test for semi colon at the end of any line,
+            # not the end of a valid python expression
+            yield ";"
+            yield last[-1]
+        else:
+            yield from rest
 
     def front_matter(self, token, env):
         """render front matter as python code with an optional variable name"""
