@@ -1,6 +1,8 @@
 from io import StringIO
 from .weave import quick_doctest, weave_argv
 
+NEST_ASYNC = None
+
 
 def post_run_cell(result):
     from IPython.display import display, Markdown
@@ -37,6 +39,7 @@ def unload_ipython_extension(shell):
 
 
 def run_ipython(source, _retry=False):
+    global NEST_ASYNC
     from asyncio import get_event_loop
     from IPython import get_ipython
     from IPython.core.interactiveshell import ExecutionResult, ExecutionInfo
@@ -52,27 +55,20 @@ def run_ipython(source, _retry=False):
     module = compile(source, filename, "exec", PyCF_ONLY_AST)
     module = shell.transform_ast(module)
     result = ExecutionResult(ExecutionInfo(source, False, False, False, filename))
-    try:
-        get_event_loop().run_until_complete(
-            shell.run_ast_nodes(
-                module.body,
-                filename,
-                compiler=shell.compile,
-                result=result,
-                interactivity=interactivity,
-            )
-        )
-    except RuntimeError:
+
+    if NEST_ASYNC is None:
         import nest_asyncio
 
         nest_asyncio.apply()
-        get_event_loop().run_until_complete(
-            shell.run_ast_nodes(
-                module.body,
-                filename,
-                compiler=shell.compile,
-                result=result,
-                interactivity=interactivity,
-            )
+        NEST_ASYNC = True
+
+    get_event_loop().run_until_complete(
+        shell.run_ast_nodes(
+            module.body,
+            filename,
+            compiler=shell.compile,
+            result=result,
+            interactivity=interactivity,
         )
+    )
     return
