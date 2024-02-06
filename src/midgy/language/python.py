@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass, field
 from io import StringIO
+from itertools import pairwise
 from textwrap import dedent
 from ..tangle import Markdown, SP
 
@@ -35,17 +36,24 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         yml=f"{YAML}:safe_load",
         toml=f"{TOML}:loads",
         front_matter="midgy.front_matter:load",
+        html="IPython.display:HTML",
+        md="IPython.display:Markdown",
     )
     fenced_code_blocks: list = field(
         default_factory=["python", "python3", "ipython3", "ipython"].copy
     )
     include_quote_parenthesis: bool = field(default=True)
+    link_iframes: bool = True
     front_matter_variable: str = "page"
     include_magic: bool = True
 
     def code_block(self, token, env):
         """render an ipython code block"""
-        if self.indented_code_blocks:
+        if token.meta.get("is_doctest"):
+            if self.doctest_code_blocks:
+                # include the doctest input block as code in the program
+                yield from self.code_doctest(token, env)
+        elif self.indented_code_blocks:
             # yield formatted non-code as string or comment
             yield from self.noncode_block(env, token)
             block = self.generate_block_lines(env, token.map[1])
@@ -53,10 +61,6 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
                 # yield code formatted python code that invokes a ipython magic
                 yield from self.cell_magic(token, block, env)
                 self.update_env(token, env, last_indent=env.get("last_indent"))
-            elif token.meta.get("is_doctest"):
-                if self.doctest_code_blocks:
-                    # include the doctest input block as code in the program
-                    yield from self.code_doctest(token, env)
             else:
                 # the default dedents the code block to align code blocks
                 yield from self.generate_dedent_block(block, env["min_indent"])
@@ -118,12 +122,13 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         """dispatch different renderings of code fences."""
         # tilde an escape hatch for code fences.
         if "~" not in token.markup:
-            if self.fenced_code_blocks:
+            if token.meta.get("is_doctest"):
+                if self.doctest_code_blocks:
+                    yield from self.fence_doctest(token, env)
+            elif self.fenced_code_blocks:
                 lang = self.get_lang(token)
-
                 # format the prior non-code
                 yield from self.noncode_block(env, token)
-
                 if lang in self.fenced_code_blocks:
                     # render fence as python code
                     yield from self.fence_code(token, env)
@@ -149,19 +154,22 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         # comment out the last of fence dashes
         yield self.COMMENT_MARKER
         yield from self.generate_block_lines(env, token.map[1])
-        self.update_env(
-            token,
-            env,
-            quoted=False,
-            continued=False,
-        )
+        self.update_env(token, env, quoted=False, continued=False)
+
+    def fence_doctest(self, token, env):
+        """render code fence as python code"""
+        # we can't do this yet because we haven't parsed the doctest info.
+        yield from ()
 
     def fence_noncode(self, token, env):
         """render a fence as a block string with an optional caller method"""
         yield SP * self.get_indent(env)
 
         # fence method are functions applied to block string in a fence like json, toml, tomli
-        yield self.get_fence_method(token)
+        method = self.get_fence_method(token)
+        if method:
+            # methods are preceded a parenthesis allowing for line contination
+            yield f"({method}"
 
         # parenthesis are used to group strings together and allow for methods to called on the block string.
         # group and comment out the first line of the fence dashes
@@ -179,6 +187,8 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         # this syntax restricuts from using line continuations like indented code blocks
         # if the comment were dropped then we could use continuations
         yield ")"
+        if method:
+            yield ")"
         yield " # "
         rest = self.generate_block_lines(env, token.map[1])
         if token.meta["next_code"] is None:
@@ -204,12 +214,27 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         # comment out first and last line while applying a parsing method to string
         yield from self.fence_noncode(token, env)
 
+    def display_iframes(self, tokens, env, target):
+        print(
+            f"""__import__("importlib").import_module("midgy._ipython").iframes('''""",
+            sep="",
+            end="",
+            file=target,
+        )
+        for line in self.generate_block_lines(env):
+            print(line, sep="", end="", file=target)
+        print("""''');""", sep="", end="", file=target)
+
     def generate_tokens(self, tokens, env=None, src=None, stop=None, target=None):
         """generate lines of python code transformed from mardown."""
         right = src.lstrip()
         if right.startswith(("%%",)):
             for part in self.cell_magic(None, StringIO(right), env):
                 print(part, sep="", end="", file=target)
+            return
+
+        if self.link_iframes and is_urls(tokens):
+            self.display_iframes(tokens, env, target)
             return
 
         # work backwards through the tokens to associated code blocks and non-code blocks
@@ -311,7 +336,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
                 if paren and self.include_quote_parenthesis:
                     yield "( "
                 yield self.STRING_MARKER[0]
-        yield from StringIO(body)
+        yield from StringIO(self.escape(body))
         if body:
             # place tight quote after the block string body
             if not env.get("quoted"):
@@ -335,3 +360,25 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         env["last_indent"] = token.meta.get("last_indent")
         env["next_code"] = token.meta.get("next_code")
         env.update(kwargs)
+
+
+def is_urls(tokens):
+    """determine if a string is a block of urls from markdown it tokens."""
+
+    for token in tokens:
+        if token.type in {"paragraph_open", "paragraph_close"}:
+            continue
+        if token.type == "inline":
+            for child, next_child in pairwise(token.children + [None]):
+                if child.type == "link_open":
+                    if next_child and next_child.type == "text":
+                        continue
+                elif child.type == "text":
+                    if next_child and next_child.type == "link_close":
+                        continue
+                    return False
+                elif child.type in {"softbreak", "link_close"}:
+                    continue
+            continue
+        return False
+    return True

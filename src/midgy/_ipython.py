@@ -1,3 +1,4 @@
+import dis
 from io import StringIO
 from .weave import quick_doctest, weave_argv
 
@@ -36,6 +37,12 @@ def unload_ipython_extension(shell):
             shell.events.unregister("post_run_cell", post_run_cell)
         except ValueError:
             pass
+
+
+def iframes(string, width="100%", height="600", **kwargs):
+    from IPython.display import IFrame, display, Markdown
+    for url in string.split():
+        display(Markdown(F"[{url}]({url})"), IFrame(url, width=width, height=height, **kwargs))
 
 
 def run_ipython(source, _retry=False):
