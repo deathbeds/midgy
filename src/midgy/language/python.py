@@ -4,6 +4,7 @@
 from dataclasses import dataclass, field
 from io import StringIO
 from itertools import pairwise
+from re import sub
 from textwrap import dedent
 from ..tangle import Markdown, SP
 
@@ -89,7 +90,14 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
     def cell_magic(self, token, block, env):
         """render a cell magic on a buffer that starts at the cell magic line"""
         first = next(block)
-        prog, *args = first.strip().lstrip("%").split(maxsplit=1)
+        prog = first.strip().lstrip("%")
+
+        try:
+            prog, *args = prog.split(maxsplit=1)
+        except ValueError:
+            # no whitespace to split
+            args = ()
+            
         min_indent = token and token.meta.get("min_indent") or 0
         yield SP * self.get_indent(env)
 
@@ -194,9 +202,11 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         if token.meta["next_code"] is None:
             last = next(rest)
             yield last[:-1]
-            # ipython test for semi colon at the end of any line,
-            # not the end of a valid python expression
-            yield ";"
+            if not method:
+                # show anything with a method directly
+                # ipython test for semi colon at the end of any line,
+                # not the end of a valid python expression
+                yield ";"
             yield last[-1]
         else:
             yield from rest
