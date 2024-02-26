@@ -1,10 +1,8 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from importlib import import_module
 from shlex import split
-from tempfile import TemporaryFile
-from textwrap import indent
 
-from .tangle import SP, Tangle
+from .tangle import Tangle
 from ._argparser import parser
 
 
@@ -53,7 +51,11 @@ def weave(
         from IPython.display import display, Markdown
 
         display(Markdown(self.source))
-    show and print(self.out)
+
+    
+    if show:
+        # rich uses bbcode to format strings so we need to duck that
+        print(self.out.replace("[", r"\["))
 
     try:
         if run:
