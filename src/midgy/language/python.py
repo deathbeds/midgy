@@ -5,11 +5,16 @@ from dataclasses import dataclass, field
 from io import StringIO
 from itertools import pairwise
 from re import sub
+from subprocess import check_output
 from textwrap import dedent
 from ..tangle import Markdown, SP
 
 YAML = "yaml"  # yaml library we use, users may have different preferences.
 TOML = "tomli"  # toml library we use, users may have different preferences.
+
+
+def _shell_out(body):
+    return check_output(body, shell=True).decode()
 
 
 @dataclass
@@ -37,8 +42,12 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         yml=f"{YAML}:safe_load",
         toml=f"{TOML}:loads",
         front_matter="midgy.front_matter:load",
+        css="midgy.language.python:_css",
         html="IPython.display:HTML",
         md="IPython.display:Markdown",
+        **{
+            "!": "midgy.language.python:_shell_out",
+        },
     )
     fenced_code_blocks: list = field(
         default_factory=["python", "python3", "ipython3", "ipython"].copy
@@ -97,7 +106,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         except ValueError:
             # no whitespace to split
             args = ()
-            
+
         min_indent = token and token.meta.get("min_indent") or 0
         yield SP * self.get_indent(env)
 
@@ -129,7 +138,10 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
     def fence(self, token, env):
         """dispatch different renderings of code fences."""
         # tilde an escape hatch for code fences.
-        if "~" not in token.markup:
+        if "~" in token.markup:
+            if self.fenced_code_blocks:
+                yield from self.fence_noncode(token, env)
+        else:
             if token.meta.get("is_doctest"):
                 if self.doctest_code_blocks:
                     yield from self.fence_doctest(token, env)
@@ -392,3 +404,9 @@ def is_urls(tokens):
             continue
         return False
     return True
+
+
+def _css(body):
+    from IPython.display import HTML
+
+    return HTML("<style>{}</style>".format(body))
