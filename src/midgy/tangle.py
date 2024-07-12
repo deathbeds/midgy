@@ -15,12 +15,23 @@ from io import StringIO
 from re import compile
 import re
 
+import markdown_it
+import markdown_it.renderer
+
 __all__ = ()
 
 DOCTEST_CHAR, CONTINUATION_CHAR, COLON_CHAR, QUOTES_CHARS = 62, 92, 58, {39, 34}
 BLOCK, FENCE, PYCON = "code_block", "fence", "pycon"
 SP, QUOTES = chr(32), (chr(34) * 3, chr(39) * 3)
 
+
+class RendererHTML(markdown_it.renderer.RendererHTML):
+    def renderToken(self, tokens, idx, options, env):
+        string = super().renderToken(tokens, idx, options, env)
+        if len(string) == 2 and string == "<>":
+            return ""
+        
+        return string
 
 @dataclass
 class Tangle:
@@ -94,16 +105,17 @@ class Tangle:
             while env["last_line"] < stop:
                 x = self.readline(env)
                 yield x
+
     def generate_code_block_body(self, block, token, env):
         yield from self.generate_dedent_block(block, env["min_indent"])
 
-    def generate_comment(self, block, token, env):
+    def generate_comment(self, block, token, env, *, prepend="", **kwargs):
         if self.comment_prefix_line:
             pre = SP * self.generate_env_indent(env, token) + self.COMMENT_MARKER
-            yield from self.generate_wrapped_lines(block, pre=pre)
+            yield from self.generate_wrapped_lines(block, pre=pre, lead=prepend)
         else:
             self.generate_wrapped_lines(
-                block, lead=self.COMMENT_MARKER[0], trail=self.COMMENT_MARKER[1]
+                block, lead=(prepend or "") + self.COMMENT_MARKER[0], trail=self.COMMENT_MARKER[1]
             )
 
     def generate_dedent_block(self, block, dedent):
@@ -136,40 +148,40 @@ class Tangle:
     def generate_wrapped_lines(self, lines, lead="", pre="", trail="", continuation=""):
         """a utility function to manipulate a buffer of content line-by-line."""
         # can do this better with buffers
-        whitespace, any, continued = "", False, False
+        whitespace, any, continued = StringIO(), False, False
         for line in lines:
             length = len(line.rstrip())
             if length:
                 if any:
-                    yield whitespace
+                    yield whitespace.getvalue()
                 else:
-                    for i, l in enumerate(StringIO(whitespace)):
+                    for i, l in enumerate(whitespace):
                         yield from (continuation, l[-1])
                 if self.CONTINUE_MARKER:
                     continued = line[length - 1] == self.CONTINUE_MARKER
                     if continued:
-                        length -= 2 # cause of the escape?
+                        length -= 2  # cause of the escape?
                 yield pre
                 yield lead
                 yield line[:length]
-                lead, any, whitespace = "", True, line[length:]
+                lead, any, whitespace = "", True, StringIO(line[length:])
             else:
-                whitespace += line
+                whitespace.write(line)
         if any:
             yield trail
         if any:
+            whitespace.seek(0)
             if continued:
-                for i, line in enumerate(StringIO(whitespace)):
+                for i, line in enumerate(whitespace):
                     yield pre * bool(i)
-                    yield line[0 if i else 2:-1]
+                    yield line[0 if i else 2 : -1]
                     yield self.CONTINUE_MARKER
                     yield line[-1]
             else:
-                if any:
-                    for i, line in enumerate(StringIO(whitespace)):
-                        yield pre * bool(i) + line
+                for i, line in enumerate(whitespace):
+                    yield pre * bool(i) + line
         else:
-            yield from map((continuation or "").__add__, StringIO(whitespace))
+            yield from map((continuation or "").__add__, whitespace)
 
     def initialize_env(self, src, tokens):
         """initialize the parser environment indents"""
@@ -178,6 +190,7 @@ class Tangle:
             if not token.meta.get("is_magic"):
                 env["min_indent"] = min(env.get("min_indent", 9999), token.meta["min_indent"])
         env.setdefault("min_indent", 0)
+        env.setdefault("whitespace", StringIO())
         return env
 
     def initialize_parser(self):
@@ -212,7 +225,8 @@ class Tangle:
         if self.indented_code_blocks and token.type == BLOCK:
             return self.indented_code_blocks
         elif token.type == FENCE:
-            return (token.info or "%").split(maxsplit=1)[0] in (self.fenced_code_blocks or ())
+            tokens = (token.info or "%").split(maxsplit=1) or [""]
+            return tokens[0] in (self.fenced_code_blocks or ())
         return False
 
     def parse(self, src, env=None):
@@ -262,7 +276,11 @@ def get_markdown_it(cache=True, cached={}):
     from markdown_it import MarkdownIt
 
     if not cache:
-        return MarkdownIt("gfm-like", options_update=dict(inline_definitions=True, langPrefix=""))
+        return MarkdownIt(
+            "gfm-like",
+            options_update=dict(inline_definitions=True, langPrefix=""),
+            renderer_cls=RendererHTML,
+        )
     if not cached:
         cached["cache"] = get_markdown_it(False)
     return cached["cache"]

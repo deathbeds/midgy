@@ -1,9 +1,22 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import import_module
 from shlex import split
+from typing import Any
+
+from arrow import get
 
 from .tangle import Tangle
 from ._argparser import parser
+
+
+def get_environment():
+    from ._magics import get_environment
+    from IPython import get_ipython
+
+    shell = get_ipython()
+    if shell.has_trait("environment"):
+        return shell.environment
+    return get_environment()
 
 
 @dataclass
@@ -13,6 +26,7 @@ class Weave:
     out: str = None
     env: dict = None
     tokens: list = None
+    environment: Any = field(default_factory=get_environment)
 
 
 def weave(
@@ -21,7 +35,7 @@ def weave(
     module=None,
     run=True,
     show=False,
-    language="python",
+    language=None,
     extra=None,
     debug=False,
     tokens=False,
@@ -29,15 +43,33 @@ def weave(
     unittest=False,
     format=False,
     magic=False,
+    name=None,
+    html=True,
+    lists=True,
+    defs=False, 
+    unsafe=False,
     **kwargs,
 ):
+    from IPython import get_ipython
+    shell = get_ipython()
     try:
         from rich import print
     except ModuleNotFoundError:
         from builtins import print
     unittest = kwargs.pop("unittest", unittest)
-    parser = Tangle.cls_from_lang(language)(**kwargs)
-    self = Weave(source=cmd, parser=parser)
+    env = None
+    if shell and language is None:
+        parser = shell.tangle.parser
+        env = shell._markdown_env
+    else:
+        parser = Tangle.cls_from_lang(language or "python")(**kwargs)
+    if unsafe:
+        cmd = shell.environment.from_string(cmd).render()
+    if name is not None:
+        # allow exposing the source code as a named variable
+        # this is a great optional feature for debugging or reusing code.
+        get_ipython().user_ns[name] = cmd
+    self = Weave(source=cmd, parser=parser, env=env)
     self.tokens = self.parser.parse(self.source, self.env)
     if tokens:
         print(self.tokens)
@@ -47,12 +79,7 @@ def weave(
         out = blacken(out)
     self.out = Block(out)
 
-    if weave and self.tokens[0].map[0] == int(magic):
-        from IPython.display import display, Markdown
 
-        display(Markdown(self.source))
-
-    
     if show:
         # rich uses bbcode to format strings so we need to duck that
         print(self.out.replace("[", r"\["))
@@ -64,10 +91,21 @@ def weave(
         if unittest and not self.parser.doctest_code_blocks:
             quick_doctest(self.source)
 
+        if weave and self.tokens[0].map[0] == int(magic):
+            from IPython.display import display, Markdown, HTML
+
+            if html:
+                display(HTML(self.parser.parser.render(
+                    self.environment.from_string(self.source).render(), env
+                    )))
+                if env:
+                    env.pop("duplicate_refs", None)
+            else:
+                display(Markdown(self.environment.from_string(self.source).render()))
 
 def blacken(string):
     import black
-
+    print("black")
     return black.format_str(string, mode=black.FileMode())
 
 

@@ -1,19 +1,24 @@
+import builtins
 from dataclasses import dataclass, field
 from doctest import ELLIPSIS
+from functools import lru_cache
 from io import StringIO
 from pathlib import Path
 from shlex import split
 from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
+from jinja2 import Environment
+
+from midgy.language.python import Python
+
 from ._ipython import run_ipython
 
 from .weave import quick_doctest, weave_argv
 from ._argparser import parser
-
-from traitlets import Any, CInt, CUnicode, HasTraits, CBool, Instance, List, Type, Unicode, Bool
+from traitlets import Any, CInt, CUnicode, Dict, HasTraits, CBool, Instance, List, Type, Unicode, Bool
 
 
 class Tangle(HasTraits):
-    from .language.python import Python
+    from .containers import Containers
 
     noncode_blocks = CBool().tag(config=True)
     code_blocks = List(CUnicode, ["indent"]).tag(config=True)
@@ -73,23 +78,43 @@ def get_parser(x):
 @magics_class
 class TangleMagic(Magics):
     @cell_magic
-    def tangle(self, line, cell):
+    def tangle(self, line, cell=""):
         from shlex import quote
 
         cmd = split(line) + ["--cmd", "\n" + cell]
         with self.shell.tangle:
-            return weave_argv(cmd, magic=True)
+            try:
+                return weave_argv(cmd, magic=True)
+            except SystemExit:
+                pass
+
+
+@lru_cache(1)
+def get_environment():
+    from jinja2 import Environment
+
+    return Environment()
 
 
 # this extension is installed by default when midgy is imported in an ipython context
 def load_ipython_extension(shell):
     """initialize the tangle and weave magics for explicit use cases."""
     if shell:
+        from jinja2 import Environment
+
         shell.user_ns.setdefault("shell", shell)
         if not shell.has_trait("tangle"):
             shell.add_traits(tangle=Instance(Tangle, (), {}))
         if not shell.has_trait("weave"):
             shell.add_traits(weave=Instance(Weave, (), {}))
+        if not shell.has_trait("environment"):
+            shell.add_traits(environment=Instance(Environment, (), {}))
+            shell.environment = get_environment()
+            shell.environment.globals = shell.user_global_ns    
+            shell.environment.globals.update(vars(builtins))
+        if not shell.has_trait("_markdown_env"):
+            shell.add_traits(_markdown_env=Dict({}))
+
         shell.register_magics(TangleMagic(shell))
         magic = shell.magics_manager.magics["cell"]["tangle"]
         shell.magics_manager.magics["cell"][""] = magic

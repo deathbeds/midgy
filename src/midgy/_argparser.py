@@ -5,7 +5,7 @@ parser.add_argument(
     "-l",
     "--lang",
     "--language",
-    default="python",
+    default=None,
     type=str,
     dest="language",
     help="the target language",
@@ -56,6 +56,15 @@ parser.add_argument(
 #     type=str,
 # )
 parser.add_argument(
+    "-u",
+    "--unsafe",
+    dest="unsafe",
+    help="template source before execution",
+    default=False,
+    action="store_true",
+)
+
+parser.add_argument(
     "-s",
     "--show",
     action="store_true",
@@ -75,14 +84,36 @@ parser.add_argument(
     "--weave", action="store_true", dest="weave", help="""show the display""", default=True
 )
 parser.add_argument(
+    "--lists",
+    action="store_true",
+    dest="lists",
+    help="""don't translate markdown lists to python lists""",
+    default=".-*",
+)
+# yaml uses these for lists
+parser.add_argument(
+    "-d",
+    "--defs",
+    action="store_true",
+    dest="defs",
+    help="""translate markdown definition lists to python dictionaries""",
+    default=True,
+)
+parser.add_argument(
+    "-n",
+    "--name",
+    type=str,
+    dest="name",
+    help="""name to store the source code as""",
+    default=None,
+)
+parser.add_argument(
     "-w", "--no-weave", action="store_false", dest="weave", help="""hide the display"""
 )
 parser.add_argument(
-    "-t", "--tokens", action="store_true", default=False, help="show markdown tokens"
+    "-p", "--tokens", action="store_true", default=False, help="show parsed markdown tokens"
 )
-parser.add_argument(
-    "-u", "--unittest", action="store_true", default=False, help="test the code"
-)
+parser.add_argument("-t", "--unittest", action="store_false", default=True, help="test the code")
 parser.add_argument(
     "-y", "--run", action="store_true", dest="run", help="""execute the source code""", default=True
 )
@@ -90,8 +121,16 @@ parser.add_argument(
     "-x", "--no-run", action="store_false", dest="run", help="""hide the source code"""
 )
 parser.add_argument("-m", "--module", type=str, help="""a module to execute""")
+parser.add_argument(
+    "--md",
+    action="store_false",
+    help="""use the ipython markdown display instead of the html display""",
+    dest="html",
+    default=True,
+)
 parser.add_argument("-c", "--cmd", type=str, help="""a command to execute""")
 parser.add_argument("file", nargs="*", type=str, help="a file to execute")
+
 
 def run(*args):
     from .tangle import Tangle

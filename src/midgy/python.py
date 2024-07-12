@@ -1,210 +1,409 @@
-"""the Python class that translates markdown to python code"""
+"""transform markdown to python
+"""
+
 from dataclasses import dataclass, field
 from io import StringIO
-from copy import copy
-from functools import partial
-from .render import Renderer, escape, FENCE, SP, QUOTES
-from .lexers import MAGIC
-from typing import Tuple
+from itertools import pairwise
+from re import sub
+from subprocess import check_output
+from textwrap import dedent
+from .tangle import Markdown, SP
 
-DEFAULT_FENCE_LANGS = "python", "ipython"
+YAML = "yaml"  # yaml library we use, users may have different preferences.
+TOML = "tomli"  # toml library we use, users may have different preferences.
+
+
+def _shell_out(body):
+    return check_output(body, shell=True).decode()
 
 
 @dataclass
-class Python(Renderer):
-    """a line-for-line markdown to python translator"""
+class Python(Markdown, type="text/x-python", language="ipython3"):
+    """transform markdown to python code
 
-    # include markdown as docstrings of functions and classes
-    include_docstring: bool = True
-    # include docstring as a code block
-    include_doctest: bool = False
-    # include front matter as a code block
-    include_front_matter: bool = True
-    # include markdown in that code as strings, (False) uses comments
-    include_markdown: bool = True
-    # code fence languages that indicate a code block
-    include_code_fences: Tuple[str] = field(default_factory=partial(copy, DEFAULT_FENCE_LANGS))
+    * a line-for-line transformation from md to py
+    * characters are added, not removed **
+
+    **: doctest must modify source to work in midgy
+    """
+
+    COMMENT_MARKER = "# "
+    STRING_MARKER = ['"""', '"""']
+    CONTINUE_MARKER = "\\"
+    TERMINAL_MARKER = ";"
+
+    # these entry point style references map to functiosn that code load string syntaxes
+    fence_methods = dict(
+        ini="midgy.front_matter:get_ini",
+        cfg="midgy.front_matter:get_ini",
+        json="json:loads",
+        json5="json5:loads",
+        yaml=f"{YAML}:safe_load",
+        yml=f"{YAML}:safe_load",
+        toml=f"{TOML}:loads",
+        front_matter="midgy.front_matter:load",
+        css="midgy.language.python:_css",
+        html="IPython.display:HTML",
+        md="IPython.display:Markdown",
+        **{
+            "!": "midgy.language.python:_shell_out",
+        },
+    )
+    fenced_code_blocks: list = field(
+        default_factory=["python", "python3", "ipython3", "ipython"].copy
+    )
+    include_quote_parenthesis: bool = field(default=True)
+    link_iframes: bool = True
+    front_matter_variable: str = "page"
     include_magic: bool = True
 
-    front_matter_loader = '__import__("midgy").front_matter.load'
-    QUOTE = QUOTES[0]
-
     def code_block(self, token, env):
-        if token.meta["is_doctest"]:
-            if self.include_doctest:
-                yield from self.code_block_doctest(token, env)
-        elif self.include_indented_code:
-            yield from self.noncode(env, token)
-            yield from self.code_block_body(self.get_block(env, token.map[1]), token, env)
-            self.get_updated_env(token, env)
+        """render an ipython code block"""
+        if token.meta.get("is_doctest"):
+            if self.doctest_code_blocks:
+                # include the doctest input block as code in the program
+                yield from self.code_doctest(token, env)
+        elif self.indented_code_blocks:
+            # yield formatted non-code as string or comment
+            yield from self.noncode_block(env, token)
+            block = self.generate_block_lines(env, token.map[1])
+            if self.include_magic and token.meta.get("is_magic"):
+                # yield code formatted python code that invokes a ipython magic
+                yield from self.cell_magic(token, block, env)
+                self.update_env(token, env, last_indent=env.get("last_indent"))
+            else:
+                # the default dedents the code block to align code blocks
+                yield from self.generate_dedent_block(block, env["min_indent"])
+                self.update_env(token, env)
 
-    def code_block_body(self, block, token, env):
-        if token.meta["is_doctest"]:
-            block = self.get_block_sans_doctest(block)
-        if self.is_magic(token):
-            block = self.code_block_magic(block, self.get_computed_indent(env), env)
-        yield from self.dedent_block(block, (not token.meta["is_magic"]) * env["min_indent"])
+    def code_doctest(self, token, env):
+        """format a markdown doctest into valid code.
 
-    def code_block_doctest(self, token, env):
-        yield from self.noncode(env, token)
-        yield from self.code_block_body(self.get_block(env, token.meta["input"][1]), token, env)
+        the input is included in the program and the output is commented out."""
+
+        block = self.generate_block_lines(env, token.meta["input"][1])
+
+        # normalize the input statement STRING_MARby dedenting & removing the 4 prefixes chars ">>> ", "... "
+        block = self.generate_dedent_block(block, token.meta["min_indent"] + 4)
+        indent = SP * self.get_indent(env)
+
+        # indent the input block to align with the implicit indent
+        yield from map(indent.__add__, block)
         if token.meta["output"]:
-            block = self.get_block(env, token.meta["output"][1])
-            block = self.dedent_block(block, token.meta["min_indent"])
-            yield from self.comment(block, env)
-        self.get_updated_env(token, env, colon_block=False, quoted_block=False, continued=False)
+            block = self.generate_block_lines(env, token.meta["output"][1])
+            block = self.generate_dedent_block(block, token.meta["min_indent"])
+            # export the output blocks as comments so they do no interact with the program
+            yield from map(indent.__add__, self.generate_comment(block, token, env))
+        self.update_env(token, env, indented=False, quoted=False, continued=False)
 
-    def code_block_magic(self, block, indent, env, dedent=True):
-        line = next(block)
-        left = line.rstrip()
-        # split magic name and arguments
-        program, _, args = left.lstrip().lstrip("%").partition(" ")
-        # add whitespace relative to the indents allowing for condition magics
-        yield SP * self.get_computed_indent(env)
-        # prefix the ipython run cell magic caller
-        yield from ("get_ipython().run_cell_magic('", program, "', '")
-        yield from (args, "',", line[len(left) :])
-        if dedent:
-            block = self.dedent_block(block, indent + env.get("min_indent", 0))
-        # quote the block of the cell body
-        yield from self.get_wrapped_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
+    def cell_magic(self, token, block, env):
+        """render a cell magic on a buffer that starts at the cell magic line"""
+        first = next(block)
+        prog = first.strip().lstrip("%")
 
-    def comment(self, block, env):
-        yield from self.get_wrapped_lines(block, pre=SP * self.get_computed_indent(env) + "# ")
+        try:
+            prog, *args = prog.split(maxsplit=1)
+        except ValueError:
+            # no whitespace to split
+            args = ()
 
-    def dedent_block(self, block, dedent):
-        yield from (x[dedent:] for x in block)
+        min_indent = token and token.meta.get("min_indent") or 0
+        yield SP * self.get_indent(env)
+
+        # write the first line of the cell magic, the same transform IPython makes
+        yield f"""get_ipython().run_cell_magic("{prog}", "{args and args[0] or ''}", """
+
+        # we might have to worry about line continuations, that is not considered yet.
+        # comment out the original line so we retain the undisturbed source
+        yield f"# {first}"
+
+        # write the cell body as a block string stripping the right most whitespace
+        cell = "".join(self.generate_dedent_block(block, min_indent))
+        left = cell.rstrip()
+
+        # triple block quotes around cell
+        yield from (self.STRING_MARKER[0], self.escape(left), self.STRING_MARKER[0])
+        # close the magic method caller and write the trailing whitespace
+        yield from (")", cell[len(left) :])
+
+    @staticmethod
+    def escape(str):
+        return str.replace("\\", r"\\").replace('"', r"\"")
+
+    def eval(self, tangled):
+        from ._ipython import run_ipython
+
+        return run_ipython(tangled)
 
     def fence(self, token, env):
-        """the fence renderer is pluggable.
+        """dispatch different renderings of code fences."""
+        # tilde an escape hatch for code fences.
+        if "~" in token.markup:
+            if self.fenced_code_blocks:
+                yield from self.fence_noncode(token, env)
+        else:
+            if token.meta.get("is_doctest"):
+                if self.doctest_code_blocks:
+                    yield from self.fence_doctest(token, env)
+            elif self.fenced_code_blocks:
+                lang = self.get_lang(token)
+                # format the prior non-code
+                yield from self.noncode_block(env, token)
+                if lang in self.fenced_code_blocks:
+                    # render fence as python code
+                    yield from self.fence_code(token, env)
+                else:
+                    # render fence as block string
+                    yield from self.fence_noncode(token, env)
 
-        if token_{token.info} exists then that method is called to render the token"""
+    def fence_code(self, token, env):
+        """render code fence as python code"""
 
-        if token.info:
-            method = getattr(self, f"fence_{token.info}", None)
-            if method:
-                return method(token, env)
+        # comment out the first line of the fence dashes
+        yield self.COMMENT_MARKER
+        yield from self.generate_block_lines(env, token.map[0] + 1)
 
-            if token.meta["is_magic_info"]:
-                return self._fence_info_magic(token, env)
+        block = self.generate_block_lines(env, token.map[1] - 1)
+        if self.include_magic and token.meta.get("is_magic"):
+            # render the fence content as a cell magic invocation
+            yield from self.cell_magic(token, block, env)
+        else:
+            # dedent the code like we would an indent code block
+            yield from self.generate_dedent_block(block, env["min_indent"])
 
-    def _fence_info_magic(self, token, env):
-        """return a modified code fence that identifies as code"""
+        # comment out the last of fence dashes
+        yield self.COMMENT_MARKER
+        yield from self.generate_block_lines(env, token.map[1])
+        self.update_env(token, env, quoted=False, continued=False)
 
-        yield from self.noncode(env, token)
-        line = next(self.get_block(env, token.map[0] + 1))
-        left = line.rstrip()
-        right = left.lstrip()
-        markup = right[0]
-        program, _, args = right.lstrip("`~").lstrip("%").partition(" ")
-        yield from ("get_ipython().run_cell_magic('", program, "', '")
-        yield from (args, "', # ", markup * 3, line[len(left) :])
+    def fence_doctest(self, token, env):
+        """render code fence as python code"""
+        # we can't do this yet because we haven't parsed the doctest info.
+        yield from ()
 
-        block = self.get_block(env, token.map[1] - 1)
-        block = self.dedent_block(block, token.meta["min_indent"])
-        yield from self.get_wrapped_lines(block, lead=self.QUOTE, trail=self.QUOTE + ")")
+    def fence_noncode(self, token, env):
+        """render a fence as a block string with an optional caller method"""
+        yield SP * self.get_indent(env)
 
-        self.get_updated_env(token, env)
-        yield from self.comment(self.get_block(env, token.map[1]), env)
+        # fence method are functions applied to block string in a fence like json, toml, tomli
+        method = self.get_fence_method(token)
+        if method:
+            # methods are preceded a parenthesis allowing for line contination
+            yield f"({method}"
 
-    def fence_python(self, token, env):
-        """return a modified code fence that identifies as code"""
-        if token.info in self.include_code_fences:
-            yield from self.noncode(env, token)
-            yield from self.comment(self.get_block(env, token.map[0] + 1), env)
-            block = self.get_block(env, token.map[1] - 1)
-            yield from self.code_block_body(block, token, env)
-            self.get_updated_env(token, env)
-            yield from self.comment(self.get_block(env, token.map[1]), env)
+        # parenthesis are used to group strings together and allow for methods to called on the block string.
+        # group and comment out the first line of the fence dashes
+        yield "( # "
+        yield from self.generate_block_lines(env, token.map[0] + 1)
 
-    fence_ipython = fence_python
+        # quote and escape the string block
+        yield self.STRING_MARKER[0]
+        block = self.generate_block_lines(env, token.map[1] - 1)
+        block = self.generate_dedent_block(block, token.meta.get("min_indent"))
+        yield from map(self.escape, block)
+        yield self.STRING_MARKER[1]
+
+        # close the fence group and comment out the last fence dashes
+        # this syntax restricuts from using line continuations like indented code blocks
+        # if the comment were dropped then we could use continuations
+        yield ")"
+        if method:
+            yield ")"
+        yield " # "
+        rest = self.generate_block_lines(env, token.map[1])
+        if token.meta["next_code"] is None:
+            last = next(rest)
+            yield last[:-1]
+            if not method:
+                # show anything with a method directly
+                # ipython test for semi colon at the end of any line,
+                # not the end of a valid python expression
+                yield ";"
+            yield last[-1]
+        else:
+            yield from rest
 
     def front_matter(self, token, env):
-        """comment, codify, or stringify blocks of front matter"""
-        if self.include_front_matter:
-            lead = f"locals().update({self.front_matter_loader}(" + self.QUOTE
-            trail = self.QUOTE + "))"
-            body = self.get_block(env, token.map[1])
-            yield from self.get_wrapped_lines(body, lead=lead, trail=trail)
-        else:
-            yield from self.comment(self.get_block(env, token.map[1]), env)
+        """render front matter as python code with an optional variable name"""
+        yield from self.generate_block_lines(env, token.map[0])
+        if self.front_matter_variable:
+            # the front matter variable is the name assign the parsed front matter.
+            # we choose the default name because of its conventions in static site generators
+            # like jekyll.
+            yield self.front_matter_variable
+            yield " = "
 
-    def get_block_sans_doctest(self, block):
-        for line in block:
-            right = line.lstrip()
-            if right:
-                line = line[: len(line) - len(right)] + right[4:]
+        # comment out first and last line while applying a parsing method to string
+        yield from self.fence_noncode(token, env)
+
+    def display_iframes(self, tokens, env, target):
+        print(
+            f"""__import__("importlib").import_module("midgy._ipython").iframes('''""",
+            sep="",
+            end="",
+            file=target,
+        )
+        for line in self.generate_block_lines(env):
+            print(line, sep="", end="", file=target)
+        print("""''');""", sep="", end="", file=target)
+
+    def generate_tokens(self, tokens, env=None, src=None, stop=None, target=None):
+        """generate lines of python code transformed from mardown."""
+        right = src.lstrip()
+        if right.startswith(("%%",)):
+            for part in self.cell_magic(None, StringIO(right), env):
+                print(part, sep="", end="", file=target)
+            return
+
+        if self.link_iframes and is_urls(tokens):
+            self.display_iframes(tokens, env, target)
+            return
+
+        # work backwards through the tokens to associated code blocks and non-code blocks
+        code = None
+        for token in reversed(tokens):
+            token.meta["next_code"] = code
+            if self.is_code_block(token):
+                code = token
+
+        # work forward through the tokens to render the python code
+        for token in tokens:
+            if self.is_code_block(token):
+                env["next_code"] = token
+            for line in self.render_token(token, env):
+                print(line, file=target, sep="", end="")
+
+        # handle still in the buffer as a non code block
+        for line in self.noncode_block(env, stop):
+            print(line, file=target, sep="", end="")
+
+    def get_fence_method(self, token):
+        """map the code fence info to python method"""
+        lang = self.get_lang(token)
+        method = self.fence_methods.get(lang, lang)
+        if ":" in method:
+            # decode entry point style methods into importlib expressions
+            module, method = method.partition(":")[::2]
+            return f"""__import__("importlib").import_module("{module}").{method}"""
+        return ""
+
+    def get_indent(self, env):
+        """compute the indent for non-code blocks based on bounding code block conditions."""
+
+        # the default indent is the dendet of the last line of a preceeding code block
+        # or the minimum indent of the entire block
+        indent = max(env.get("last_indent", env.get("min_indent")), env.get("min_indent"))
+        if env.get("indented"):
+            # indent blocks from a colon from an if, def, or class statement.
+            # this computation makes it possible to use markdown as docstrings
+            # or trigger condition magics that weren't possible otherwise.
+            if next_code := env.get("next_code"):
+                # if there is a following code block
+                next_indent = next_code.meta["first_indent"]
+                if next_indent > indent:
+                    # prefer the next code blocks indent if it is greater than the default
+                    indent = next_indent
+                else:
+                    # otherwise add 4 spaces to avoid syntax errors
+                    indent += 4
+            else:
+                indent += 4
+        return indent - env.get("min_indent")
+
+    def get_lang(self, token):
+        """transform the fence info to the language it represents"""
+        return (lang := token.info.split(maxsplit=1)) and lang[0] or ""
+
+    def is_code_block(self, token):
+        """is the token a code block entry"""
+        if not super().is_code_block(token):
+            if token.meta.get("is_doctest"):
+                return self.doctest_code_blocks
+            # test for PYCON fence
+        return True
+
+    def noncode_block(self, env, next=None):
+        """dispatch comments of block strings for noncode blocks"""
+        block = self.generate_block_lines(env, next.map[0] if next else None)
+        if self.noncode_blocks:
+            yield from self.noncode_string(block, next, env)
+        else:
+            yield from self.generate_comment(block, None, env)
+
+    def noncode_string(self, block, next, env, paren=True):
+        """generate a block string from a noncode block"""
+        block = dedent("".join(block))
+        body = block.lstrip()
+        start = len(block) - len(body)
+        body = body.rstrip()
+        end = start + len(body)
+        prior_whitespace = StringIO(block[:start])
+        pre = "\\" if env.get("continued") else ""
+
+        # yield any preceeding whitespace
+        for _ in prior_whitespace:
+            yield pre + "\n"
+        if body:
+            # noncode blocks that end with a line continuation
+            # will continue that line to the next code or non-code block
+            continued = body.endswith("\\")
+            if continued:
+                body = body[:-1]
+            # place tight quote before the block string body
+            yield SP * self.get_indent(env)
+            if not env.get("quoted"):
+                if paren and self.include_quote_parenthesis:
+                    yield "("
+                yield self.STRING_MARKER[0]
+        yield from StringIO(self.escape(body))
+        if body:
+            # place tight quote after the block string body
+            if not env.get("quoted"):
+                yield self.STRING_MARKER[1]
+                if paren and self.include_quote_parenthesis:
+                    yield ")"
+            if next is None:
+                yield ";"
+        for line in StringIO(block[end:]):
+            if continued:
+                yield "\\"
             yield line
 
-    def get_computed_indent(self, env):
-        """compute the indent for the first line of a non-code block."""
-        next = env.get("next_code")
-        next_indent = next.meta["first_indent"] if next else 0
-        spaces = prior_indent = env.get("last_indent", 0)
-        if env.get("colon_block", False):  # inside a python block
-            if next_indent > prior_indent:
-                spaces = next_indent  # prefer greater trailing indent
-            else:
-                spaces += 4  # add post colon default spaces.
-        min_indent = env.get("min_indent", 0)
-        return max(spaces, min_indent) - min_indent
+    def render_lines(self, source):
+        return self.render("".join(source)).splitlines(True)
 
-    def get_wrapped_lines(self, lines, lead="", pre="", trail="", continuation=""):
-        """a utility function to manipulate a buffer of content line-by-line."""
-        # can do this better with buffers
-        ws, any, continued = "", False, False
-        for line in lines:
-            LL = len(line.rstrip())
-            if LL:
-                continued = line[LL - 1] == "\\"
-                LL -= 1 * continued
-                if any:
-                    yield ws
-                else:
-                    for i, l in enumerate(StringIO(ws)):
-                        yield from (pre, l[:-1], continuation, l[-1])
-                yield from (pre, lead, line[:LL])
-                lead, any, ws = "", True, line[LL:]
-            else:
-                ws += line
-        if any:
-            yield trail
-        # if continued:
-        #     for i, line in enumerate(StringIO(ws)):
-        #         yield from (i and pre or "", line[:-1], i and "\\" or "", line[-1])
-        else:
-            yield ws
+    def update_env(self, token, env, **kwargs):
+        env["quoted"] = token.meta.get("is_quoted")
+        env["continued"] = token.meta.get("is_continued")
+        env["indented"] = token.meta.get("is_indented")
+        env["last_indent"] = token.meta.get("last_indent")
+        env["next_code"] = token.meta.get("next_code")
+        env.update(kwargs)
 
-    def is_magic(self, token):
-        if self.include_magic and token.meta["is_magic"]:
-            return True
-        return token.type == FENCE and token.info == "ipython"
 
-    def noncode(self, env, next=None):
-        block = super().noncode(env, next)
-        if self.include_markdown:
-            lead = trail = "" if env.get("quoted_block", False) else self.QUOTE
-            lead = SP * self.get_computed_indent(env) + lead
-            trail += "" if next else ";"
-            # continued = env.get("continued") and "\\" or ""
-            yield from self.get_wrapped_lines(
-                map(escape, block), lead=lead, trail=trail#, continuation=continued
-            )
-        else:
-            yield from self.comment(block, env)
+def is_urls(tokens):
+    """determine if a string is a block of urls from markdown it tokens."""
 
-    def noncode_comment(self, env, next=None):
-        pass
+    for token in tokens:
+        if token.type in {"paragraph_open", "paragraph_close"}:
+            continue
+        if token.type == "inline":
+            for child, next_child in pairwise(token.children + [None]):
+                if child.type == "link_open":
+                    if next_child and next_child.type == "text":
+                        continue
+                elif child.type == "text":
+                    if next_child and next_child.type == "link_close":
+                        continue
+                    return False
+                elif child.type in {"softbreak", "link_close"}:
+                    continue
+            continue
+        return False
+    return True
 
-    def noncodestring(self, env, next=None):
-        pass
 
-    def render(self, src):
-        if MAGIC.match(src):
-            from textwrap import dedent
+def _css(body):
+    from IPython.display import HTML
 
-            return "".join(self.code_block_magic(StringIO(dedent(src)), 0, {}))
-        return super().render(src)
-
-    def shebang(self, token, env):
-        yield from self.get_block(env, token.map[1])
+    return HTML("<style>{}</style>".format(body))
