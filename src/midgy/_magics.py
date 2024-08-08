@@ -8,7 +8,7 @@ from shlex import split
 from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
 from jinja2 import Environment
 
-from midgy.language.python import Python
+from midgy.language.python import  Python, HTML, Css, Script, Markdown
 
 from ._ipython import run_ipython
 
@@ -114,6 +114,8 @@ def load_ipython_extension(shell):
             shell.environment.globals.update(vars(builtins))
         if not shell.has_trait("_markdown_env"):
             shell.add_traits(_markdown_env=Dict({}))
+        for t in (HTML, Css, Script, Markdown):
+            shell.user_ns[t.__name__] = t
 
         shell.register_magics(TangleMagic(shell))
         magic = shell.magics_manager.magics["cell"]["tangle"]

@@ -43,9 +43,10 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         yml=f"{YAML}:safe_load",
         toml=f"{TOML}:loads",
         front_matter="midgy.front_matter:load",
-        css="midgy.language.python:_css",
-        html="IPython.display:HTML",
-        md="IPython.display:Markdown",
+        css="midgy.language.python:Css",
+        html="midgy.language.python:HTML",
+        javascript="midgy.language.python:Script",
+        md="midgy.language.python:Markdown",
         **{
             "!": "midgy.language.python:_shell_out",
         },
@@ -57,7 +58,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
     link_iframes: bool = True
     front_matter_variable: str = "page"
     include_magic: bool = True
-    hr_split: str = "_" 
+    hr_split: str = "_"
 
     def hr(self, token, env):
         if token.markup[0] in self.hr_split:
@@ -341,8 +342,6 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
                 return self.doctest_code_blocks
             # test for PYCON fence
         return is_code
-    
-
 
     def noncode_block(self, env, next=None, comment=False, **kwargs):
         """dispatch comments of bock strings for noncode blocks"""
@@ -374,15 +373,23 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             )
 
     def noncode_string(
-        self, block, next_block, env, paren=True, hanging=False, prepend="", append="", whitespace=True
+        self,
+        block,
+        next_block,
+        env,
+        paren=True,
+        hanging=False,
+        prepend="",
+        append="",
+        whitespace=True,
     ):
         """generate a block string from a noncode block"""
         block = "".join(block)
         if env.get("hanging"):
-            block = StringIO(block)      
+            block = StringIO(block)
             try:
                 block = next(block) + dedent("".join(block))
-            except StopIteration: 
+            except StopIteration:
                 return
         else:
             block = dedent(block)
@@ -468,7 +475,39 @@ def is_urls(tokens):
     return True
 
 
-def _css(body):
-    from IPython.display import HTML
+class String(str):
+    @property
+    def data(self):
+        return self
 
-    return HTML("<style>{}</style>".format(body))
+    def __add__(self, b):
+        return type(self)(super().__add__(b))
+
+    def __mul__(self, b):
+        return type(self)(super().__mul__(b))
+
+
+class HTML(String):
+    tag = ""
+
+    def _repr_html_(self):
+        html = ""
+        if self.tag:
+            html += f"<{self.tag}>"
+        html += self
+        if self.tag:
+            html += f"</{self.tag}>"
+        return html
+
+
+class Css(HTML):
+    tag = "style"
+
+
+class Script(HTML):
+    tag = "script"
+
+
+class Markdown(str):
+    def _repr_markdown_(self):
+        return self
