@@ -228,6 +228,9 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             yield last[-1]
         else:
             yield from rest
+        env.update(continued=False if method else env.get("continued"))
+        
+
 
     def front_matter(self, token, env):
         """render front matter as python code with an optional variable name"""
