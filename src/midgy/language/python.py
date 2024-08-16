@@ -3,6 +3,7 @@
 
 from collections import deque
 from dataclasses import dataclass, field
+from functools import wraps
 from io import StringIO
 from itertools import pairwise, zip_longest
 from re import sub
@@ -45,7 +46,10 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         front_matter="midgy.front_matter:load",
         css="midgy.language.python:Css",
         html="midgy.language.python:HTML",
+        markdown="midgy.language.python:Markdown",
         javascript="midgy.language.python:Script",
+        graphviz="midgy.language.python:DOT",
+        dot="midgy.language.python:DOT",
         md="midgy.language.python:Markdown",
         **{
             "!": "midgy.language.python:_shell_out",
@@ -229,8 +233,6 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         else:
             yield from rest
         env.update(continued=False if method else env.get("continued"))
-        
-
 
     def front_matter(self, token, env):
         """render front matter as python code with an optional variable name"""
@@ -478,16 +480,42 @@ def is_urls(tokens):
     return True
 
 
+def enforce_cls(callable):
+    @wraps(callable)
+    def main(self, *args, **kwargs):
+        return type(self)(callable(self, *args, **kwargs))
+
+    return main
+
+
 class String(str):
     @property
     def data(self):
         return self
 
-    def __add__(self, b):
-        return type(self)(super().__add__(b))
+    __add__ = enforce_cls(str.__add__)
+    __mul__ = enforce_cls(str.__mul__)
+    __rmul__ = enforce_cls(str.__rmul__)
+    capitalize = enforce_cls(str.capitalize)
+    format = enforce_cls(str.format)
+    removeprefix = enforce_cls(str.removeprefix)
+    removesuffix = enforce_cls(str.removesuffix)
+    replace = enforce_cls(str.replace)
+    strip = enforce_cls(str.strip)
+    lstrip = enforce_cls(str.lstrip)
+    rstrip = enforce_cls(str.rstrip)
+    upper = enforce_cls(str.upper)
+    lower = enforce_cls(str.lower)
 
-    def __mul__(self, b):
-        return type(self)(super().__mul__(b))
+    @enforce_cls
+    def render(self, *args, **kwargs):
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell:
+            if shell.has_trait("environment"):
+                return shell.environment.from_string(self).render(*args, **kwargs)
+        object.__getattribute__(self, "render")
 
 
 class HTML(String):
@@ -514,3 +542,23 @@ class Script(HTML):
 class Markdown(str):
     def _repr_markdown_(self):
         return self
+
+
+class SVG(HTML):
+    def _repr_svg_(self):
+        return self
+
+
+class DOT(String):
+    def graphviz(
+        self,
+    ):
+        from graphviz import Source
+
+        return Source(self)
+
+    def _repr_svg_(self):
+        try:
+            return self.graphviz()._repr_image_svg_xml()
+        except (ModuleNotFoundError, ImportError):
+            pass
