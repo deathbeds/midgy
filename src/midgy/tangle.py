@@ -17,6 +17,7 @@ import re
 
 import markdown_it
 import markdown_it.renderer
+import pygments
 
 __all__ = ()
 
@@ -30,8 +31,9 @@ class RendererHTML(markdown_it.renderer.RendererHTML):
         string = super().renderToken(tokens, idx, options, env)
         if len(string) == 2 and string == "<>":
             return ""
-        
+
         return string
+
 
 @dataclass
 class Tangle:
@@ -218,7 +220,16 @@ class Tangle:
         parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
         parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
         parser.disable("footnote_tail")
+        parser.code_formatter = pygments.formatters.get_formatter_by_name("html", noclasses=True)
+        parser.options["highlight"] = self.highlight
         return parser
+
+    def highlight(self, source, lang, attrs):
+        return pygments.highlight(
+            source,
+            pygments.lexers.get_lexer_by_name(lang),
+            self.parser.code_formatter,
+        )
 
     def is_code_block(self, token):
         """is the token a code block entry"""
