@@ -8,7 +8,8 @@ from shlex import split
 from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
 from jinja2 import Environment
 
-from midgy.language.python import  Python, HTML, Css, Script, Markdown
+from midgy.language.python import  Python
+from midgy.types import  HTML, Css, Script, Markdown
 
 from ._ipython import run_ipython
 

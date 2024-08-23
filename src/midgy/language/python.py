@@ -4,6 +4,7 @@
 from collections import deque
 from dataclasses import dataclass, field
 from functools import wraps
+from importlib.metadata import EntryPoint
 from io import StringIO
 from itertools import pairwise, zip_longest
 from re import sub
@@ -11,12 +12,7 @@ from subprocess import check_output
 from textwrap import dedent
 from ..tangle import Markdown, SP
 
-YAML = "yaml"  # yaml library we use, users may have different preferences.
-TOML = "tomli"  # toml library we use, users may have different preferences.
-
-
-def _shell_out(body):
-    return check_output(body, shell=True).decode()
+LOAD_FENCE = """__import__("importlib").metadata.EntryPoint(None, "{}", None).load()"""
 
 
 @dataclass
@@ -25,6 +21,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
 
     * a line-for-line transformation from md to py
     * characters are added, not removed **
+    * the doctest literate programming style is supported for source code or testing
 
     **: doctest must modify source to work in midgy
     """
@@ -33,6 +30,8 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
     STRING_MARKER = ['"""', '"""']
     CONTINUE_MARKER = "\\"
     TERMINAL_MARKER = ";"
+    YAML = "yaml"  # yaml library we use, users may have different preferences.
+    TOML = "tomli"  # toml library we use, users may have different preferences.
 
     # these entry point style references map to functiosn that code load string syntaxes
     fence_methods = dict(
@@ -44,16 +43,13 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         yml=f"{YAML}:safe_load",
         toml=f"{TOML}:loads",
         front_matter="midgy.front_matter:load",
-        css="midgy.language.python:Css",
-        html="midgy.language.python:HTML",
-        markdown="midgy.language.python:Markdown",
-        javascript="midgy.language.python:Script",
-        graphviz="midgy.language.python:DOT",
-        dot="midgy.language.python:DOT",
-        md="midgy.language.python:Markdown",
-        **{
-            "!": "midgy.language.python:_shell_out",
-        },
+        css="midgy.types:Css",
+        html="midgy.types:HTML",
+        markdown="midgy.types:Markdown",
+        javascript="midgy.types:Script",
+        graphviz="midgy.types:DOT",
+        dot="midgy.types:DOT",
+        md="midgy.types:Markdown",
     )
     fenced_code_blocks: list = field(
         default_factory=["python", "python3", "ipython3", "ipython", ""].copy
@@ -95,7 +91,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
 
         block = self.generate_block_lines(env, token.meta["input"][1])
 
-        # normalize the input statement STRING_MARby dedenting & removing the 4 prefixes chars ">>> ", "... "
+        # normalize the input statement by dedenting & removing the 4 prefixes chars ">>> ", "... "
         block = self.generate_dedent_block(block, token.meta["min_indent"] + 4)
         indent = SP * self.get_indent(env)
 
@@ -184,6 +180,9 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         yield self.COMMENT_MARKER
         yield from self.generate_block_lines(env, token.map[1])
         self.update_env(token, env)
+        # we don't allow for continued blocks or explicit quotes with code fences.
+        # these affordances are only possible with indented code blocks.
+        # continutation can be acheived using parenthesis continuation
         env.update(quoted=False, continued=False)
 
     def fence_doctest(self, token, env):
@@ -305,9 +304,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         lang = self.get_lang(token)
         method = self.fence_methods.get(lang, lang)
         if ":" in method:
-            # decode entry point style methods into importlib expressions
-            module, method = method.partition(":")[::2]
-            return f"""__import__("importlib").import_module("{module}").{method}"""
+            return LOAD_FENCE.format(method)
         return ""
 
     def get_indent(self, env):
@@ -478,87 +475,3 @@ def is_urls(tokens):
             continue
         return False
     return True
-
-
-def enforce_cls(callable):
-    @wraps(callable)
-    def main(self, *args, **kwargs):
-        return type(self)(callable(self, *args, **kwargs))
-
-    return main
-
-
-class String(str):
-    @property
-    def data(self):
-        return self
-
-    __add__ = enforce_cls(str.__add__)
-    __mul__ = enforce_cls(str.__mul__)
-    __rmul__ = enforce_cls(str.__rmul__)
-    capitalize = enforce_cls(str.capitalize)
-    format = enforce_cls(str.format)
-    removeprefix = enforce_cls(str.removeprefix)
-    removesuffix = enforce_cls(str.removesuffix)
-    replace = enforce_cls(str.replace)
-    strip = enforce_cls(str.strip)
-    lstrip = enforce_cls(str.lstrip)
-    rstrip = enforce_cls(str.rstrip)
-    upper = enforce_cls(str.upper)
-    lower = enforce_cls(str.lower)
-
-    @enforce_cls
-    def render(self, *args, **kwargs):
-        from IPython import get_ipython
-
-        shell = get_ipython()
-        if shell:
-            if shell.has_trait("environment"):
-                return shell.environment.from_string(self).render(*args, **kwargs)
-        object.__getattribute__(self, "render")
-
-
-class HTML(String):
-    tag = ""
-
-    def _repr_html_(self):
-        html = ""
-        if self.tag:
-            html += f"<{self.tag}>"
-        html += self
-        if self.tag:
-            html += f"</{self.tag}>"
-        return html
-
-
-class Css(HTML):
-    tag = "style"
-
-
-class Script(HTML):
-    tag = "script"
-
-
-class Markdown(str):
-    def _repr_markdown_(self):
-        return self
-
-
-class SVG(HTML):
-    def _repr_svg_(self):
-        return self
-
-
-class DOT(String):
-    def graphviz(
-        self,
-    ):
-        from graphviz import Source
-
-        return Source(self)
-
-    def _repr_svg_(self):
-        try:
-            return self.graphviz()._repr_image_svg_xml()
-        except (ModuleNotFoundError, ImportError):
-            pass
