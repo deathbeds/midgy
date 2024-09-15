@@ -160,6 +160,10 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
                 else:
                     # render fence as block string
                     yield from self.fence_noncode(token, env)
+            else:
+                return
+            self.update_env(token, env, continued=False)
+            yield ""
 
     def fence_code(self, token, env):
         """render code fence as python code"""
