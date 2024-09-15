@@ -225,11 +225,14 @@ class Tangle:
         return parser
 
     def highlight(self, source, lang, attrs):
-        return pygments.highlight(
-            source,
-            pygments.lexers.get_lexer_by_name(lang),
-            self.parser.code_formatter,
-        )
+        try:
+            return pygments.highlight(
+                source,
+                pygments.lexers.get_lexer_by_name(lang),
+                self.parser.code_formatter,
+            )
+        except:
+            return f"""<pre><code class="{lang}">{source}</code></pre>"""
 
     def is_code_block(self, token):
         """is the token a code block entry"""
