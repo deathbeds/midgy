@@ -61,9 +61,17 @@ class Script(HTML):
     tag = "script"
 
 
-class Markdown(str):
+class Markdown(String):
     def _repr_markdown_(self):
         return self
+
+
+class Mermaid(String):
+    def _repr_markdown_(self):
+        return f"""```mermaid\n{self}```"""
+
+
+Md = Markdown 
 
 
 class SVG(HTML):
@@ -71,7 +79,7 @@ class SVG(HTML):
         return self
 
 
-class DOT(String):
+class Dot(String):
     def graphviz(
         self,
     ):
