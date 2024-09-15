@@ -46,11 +46,12 @@ def weave(
     name=None,
     html=True,
     lists=True,
-    defs=False, 
+    defs=False,
     unsafe=False,
     **kwargs,
 ):
     from IPython import get_ipython
+
     shell = get_ipython()
     try:
         from rich import print
@@ -79,7 +80,6 @@ def weave(
         out = blacken(out)
     self.out = Block(out)
 
-
     if show:
         # rich uses bbcode to format strings so we need to duck that
         print(self.out.replace("[", r"\["))
@@ -91,21 +91,25 @@ def weave(
         if unittest and not self.parser.doctest_code_blocks:
             quick_doctest(self.source)
 
+        data = {"text/x-python": self.out}
         if weave and self.tokens[0].map[0] == int(magic):
-            from IPython.display import display, Markdown, HTML
+            from IPython.display import display
 
             if html:
-                display(HTML(self.parser.parser.render(
+                output = self.parser.parser.render(
                     self.environment.from_string(self.source).render(), env
-                    )))
+                )
+                data.update({"text/html": output})
                 if env:
                     env.pop("duplicate_refs", None)
             else:
-                display(Markdown(self.environment.from_string(self.source).render()))
+                data.update({"text/markdown": self.environment.from_string(self.source).render()})
+        display(data, raw=True)
+
 
 def blacken(string):
     import black
-    print("black")
+
     return black.format_str(string, mode=black.FileMode())
 
 
