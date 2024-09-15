@@ -8,14 +8,26 @@ from shlex import split
 from IPython.core.magic import Magics, magics_class, line_magic, cell_magic
 from jinja2 import Environment
 
-from midgy.language.python import  Python
-from midgy.types import  HTML, Css, Script, Markdown
+from midgy.language.python import Python
+from midgy.types import HTML, Css, Script, Markdown
 
 from ._ipython import run_ipython
 
 from .weave import quick_doctest, weave_argv
 from ._argparser import parser
-from traitlets import Any, CInt, CUnicode, Dict, HasTraits, CBool, Instance, List, Type, Unicode, Bool
+from traitlets import (
+    Any,
+    CInt,
+    CUnicode,
+    Dict,
+    HasTraits,
+    CBool,
+    Instance,
+    List,
+    Type,
+    Unicode,
+    Bool,
+)
 
 
 class Tangle(HasTraits):
@@ -106,12 +118,14 @@ def load_ipython_extension(shell):
         shell.user_ns.setdefault("shell", shell)
         if not shell.has_trait("tangle"):
             shell.add_traits(tangle=Instance(Tangle, (), {}))
+            shell.add_traits(fence_methods=Instance(dict, (), {}))
+            shell.fence_methods = shell.tangle.parser.fence_methods
         if not shell.has_trait("weave"):
             shell.add_traits(weave=Instance(Weave, (), {}))
         if not shell.has_trait("environment"):
             shell.add_traits(environment=Instance(Environment, (), {}))
             shell.environment = get_environment()
-            shell.environment.globals = shell.user_global_ns    
+            shell.environment.globals = shell.user_global_ns
             shell.environment.globals.update(vars(builtins))
         if not shell.has_trait("_markdown_env"):
             shell.add_traits(_markdown_env=Dict({}))
