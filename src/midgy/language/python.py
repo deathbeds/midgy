@@ -47,9 +47,11 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         html="midgy.types:HTML",
         markdown="midgy.types:Markdown",
         javascript="midgy.types:Script",
-        graphviz="midgy.types:DOT",
-        dot="midgy.types:DOT",
+        graphviz="midgy.types:Dot",
+        dot="midgy.types:Dot",
         md="midgy.types:Markdown",
+        lisp="midgy.types:Hy.eval",
+        hy="midgy.types:Hy.eval"
     )
     fenced_code_blocks: list = field(
         default_factory=["python", "python3", "ipython3", "ipython", ""].copy

@@ -92,8 +92,8 @@ def weave(
             quick_doctest(self.source)
 
         data = {"text/x-python": self.out}
+        from IPython.display import display
         if weave and self.tokens[0].map[0] == int(magic):
-            from IPython.display import display
 
             if html:
                 output = self.parser.parser.render(

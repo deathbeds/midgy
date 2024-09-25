@@ -1,4 +1,6 @@
-from functools import wraps
+# all of these types should have magic counterparts
+from functools import cached_property, wraps
+from midgy.tangle import get_markdown_it
 
 
 def enforce_cls(callable):
@@ -65,13 +67,23 @@ class Markdown(String):
     def _repr_markdown_(self):
         return self
 
+    def to_html(self):
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell:
+            from midgy._magics import get_environment
+
+            return HTML(shell.tangle.parser.parser.render(self))
+        return HTML(get_markdown_it().render(self))
+
 
 class Mermaid(String):
     def _repr_markdown_(self):
         return f"""```mermaid\n{self}```"""
 
 
-Md = Markdown 
+Md = Markdown
 
 
 class SVG(HTML):
@@ -92,3 +104,43 @@ class Dot(String):
             return self.graphviz()._repr_image_svg_xml()
         except (ModuleNotFoundError, ImportError):
             pass
+
+
+class Hy(String):
+    @cached_property
+    def shell(self):
+        import hy.repl
+
+        class InteractiveHy(hy.repl.HyCompile):
+
+            def __init__(self, *a, **kw):
+                from IPython import get_ipython
+
+                shell = get_ipython()
+                # we'll need to scope this for non interactive versions
+                if shell:
+                    main = __import__("__main__")
+                else:
+                    raise TypeError("only interactive shells are supported for hy at the moment")
+                super().__init__(main, vars(main))
+                self.hy_compiler = hy.repl.HyASTCompiler(__import__(__name__))
+
+            def __call__(self, src, *args, **kwargs):
+                import builtins
+
+                exec, eval = super().__call__(src, *args, **kwargs)
+                builtins.exec(exec, vars(self.module), vars(self.module))
+                return builtins.eval(eval, vars(self.module), vars(self.module))
+
+            @classmethod
+            def execute(cls, code):
+                return cls()(code)
+
+        return InteractiveHy
+
+    def _eval(self):
+        return self.shell.execute(self)
+
+    @classmethod
+    def eval(cls, code):
+        return cls(code)._eval()
