@@ -1,20 +1,18 @@
 """transform markdown to python
 """
 
+from collections import deque
 from dataclasses import dataclass, field
+from functools import wraps
+from importlib.metadata import EntryPoint
 from io import StringIO
-from itertools import pairwise
+from itertools import pairwise, zip_longest
 from re import sub
 from subprocess import check_output
 from textwrap import dedent
-from .tangle import Markdown, SP
+from ..tangle import Markdown, SP
 
-YAML = "yaml"  # yaml library we use, users may have different preferences.
-TOML = "tomli"  # toml library we use, users may have different preferences.
-
-
-def _shell_out(body):
-    return check_output(body, shell=True).decode()
+LOAD_FENCE = """__import__("importlib").metadata.EntryPoint(None, "{}", None).load()"""
 
 
 @dataclass
@@ -23,6 +21,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
 
     * a line-for-line transformation from md to py
     * characters are added, not removed **
+    * the doctest literate programming style is supported for source code or testing
 
     **: doctest must modify source to work in midgy
     """
@@ -31,6 +30,8 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
     STRING_MARKER = ['"""', '"""']
     CONTINUE_MARKER = "\\"
     TERMINAL_MARKER = ";"
+    YAML = "yaml"  # yaml library we use, users may have different preferences.
+    TOML = "tomli"  # toml library we use, users may have different preferences.
 
     # these entry point style references map to functiosn that code load string syntaxes
     fence_methods = dict(
@@ -42,20 +43,29 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         yml=f"{YAML}:safe_load",
         toml=f"{TOML}:loads",
         front_matter="midgy.front_matter:load",
-        css="midgy.language.python:_css",
-        html="IPython.display:HTML",
-        md="IPython.display:Markdown",
-        **{
-            "!": "midgy.language.python:_shell_out",
-        },
+        css="midgy.types:Css",
+        html="midgy.types:HTML",
+        markdown="midgy.types:Markdown",
+        javascript="midgy.types:Script",
+        graphviz="midgy.types:Dot",
+        dot="midgy.types:Dot",
+        md="midgy.types:Markdown",
+        lisp="midgy.types:Hy.eval",
+        hy="midgy.types:Hy.eval"
     )
     fenced_code_blocks: list = field(
-        default_factory=["python", "python3", "ipython3", "ipython"].copy
+        default_factory=["python", "python3", "ipython3", "ipython", ""].copy
     )
     include_quote_parenthesis: bool = field(default=True)
     link_iframes: bool = True
     front_matter_variable: str = "page"
     include_magic: bool = True
+    hr_split: str = "_"
+
+    def hr(self, token, env):
+        if token.markup[0] in self.hr_split:
+            yield from self.noncode_block(env, token)
+            yield from self.noncode_block(env, token.map[1])
 
     def code_block(self, token, env):
         """render an ipython code block"""
@@ -83,7 +93,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
 
         block = self.generate_block_lines(env, token.meta["input"][1])
 
-        # normalize the input statement STRING_MARby dedenting & removing the 4 prefixes chars ">>> ", "... "
+        # normalize the input statement by dedenting & removing the 4 prefixes chars ">>> ", "... "
         block = self.generate_dedent_block(block, token.meta["min_indent"] + 4)
         indent = SP * self.get_indent(env)
 
@@ -131,17 +141,14 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         return str.replace("\\", r"\\").replace('"', r"\"")
 
     def eval(self, tangled):
-        from ._ipython import run_ipython
+        from .._ipython import run_ipython
 
         return run_ipython(tangled)
 
     def fence(self, token, env):
         """dispatch different renderings of code fences."""
-        # tilde an escape hatch for code fences.
-        if "~" in token.markup:
-            if self.fenced_code_blocks:
-                yield from self.fence_noncode(token, env)
-        else:
+        if "~" not in token.markup:
+            # tilde fences do not tangle. maybe make this configurable
             if token.meta.get("is_doctest"):
                 if self.doctest_code_blocks:
                     yield from self.fence_doctest(token, env)
@@ -155,6 +162,10 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
                 else:
                     # render fence as block string
                     yield from self.fence_noncode(token, env)
+            else:
+                return
+            self.update_env(token, env, continued=False)
+            yield ""
 
     def fence_code(self, token, env):
         """render code fence as python code"""
@@ -174,7 +185,11 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         # comment out the last of fence dashes
         yield self.COMMENT_MARKER
         yield from self.generate_block_lines(env, token.map[1])
-        self.update_env(token, env, quoted=False, continued=False)
+        self.update_env(token, env)
+        # we don't allow for continued blocks or explicit quotes with code fences.
+        # these affordances are only possible with indented code blocks.
+        # continutation can be acheived using parenthesis continuation
+        env.update(quoted=False, continued=False)
 
     def fence_doctest(self, token, env):
         """render code fence as python code"""
@@ -222,6 +237,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             yield last[-1]
         else:
             yield from rest
+        env.update(continued=False if method else env.get("continued"))
 
     def front_matter(self, token, env):
         """render front matter as python code with an optional variable name"""
@@ -247,6 +263,21 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             print(line, sep="", end="", file=target)
         print("""''');""", sep="", end="", file=target)
 
+    def parse(self, source, env=None):
+
+        tokens = super().parse(source, env)
+        if env is None:
+            env = self.initialize_env(source, tokens)
+        self.postlex(tokens, env)
+        return tokens
+
+    def postlex(self, tokens, env):
+        code = None
+        for token in tokens[::-1]:
+            token.meta["next_code"] = code
+            if self.is_code_block(token):
+                code = token
+
     def generate_tokens(self, tokens, env=None, src=None, stop=None, target=None):
         """generate lines of python code transformed from mardown."""
         right = src.lstrip()
@@ -260,18 +291,15 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             return
 
         # work backwards through the tokens to associated code blocks and non-code blocks
-        code = None
-        for token in reversed(tokens):
-            token.meta["next_code"] = code
-            if self.is_code_block(token):
-                code = token
 
         # work forward through the tokens to render the python code
-        for token in tokens:
+        for token, next in zip_longest(tokens, tokens[1:]):
+            env["next"] = next
             if self.is_code_block(token):
                 env["next_code"] = token
             for line in self.render_token(token, env):
                 print(line, file=target, sep="", end="")
+            env["last"] = token
 
         # handle still in the buffer as a non code block
         for line in self.noncode_block(env, stop):
@@ -282,9 +310,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         lang = self.get_lang(token)
         method = self.fence_methods.get(lang, lang)
         if ":" in method:
-            # decode entry point style methods into importlib expressions
-            module, method = method.partition(":")[::2]
-            return f"""__import__("importlib").import_module("{module}").{method}"""
+            return LOAD_FENCE.format(method)
         return ""
 
     def get_indent(self, env):
@@ -297,7 +323,8 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             # indent blocks from a colon from an if, def, or class statement.
             # this computation makes it possible to use markdown as docstrings
             # or trigger condition magics that weren't possible otherwise.
-            if next_code := env.get("next_code"):
+            next_code = env.get("next_code")
+            if next_code:
                 # if there is a following code block
                 next_indent = next_code.meta["first_indent"]
                 if next_indent > indent:
@@ -312,62 +339,115 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
 
     def get_lang(self, token):
         """transform the fence info to the language it represents"""
-        return (lang := token.info.split(maxsplit=1)) and lang[0] or ""
+        lang = token.info.split(maxsplit=1)
+        return lang and lang[0] or ""
 
     def is_code_block(self, token):
         """is the token a code block entry"""
-        if not super().is_code_block(token):
+        is_code = super().is_code_block(token)
+        if not is_code:
             if token.meta.get("is_doctest"):
                 return self.doctest_code_blocks
             # test for PYCON fence
-        return True
+        return is_code
 
-    def noncode_block(self, env, next=None):
-        """dispatch comments of block strings for noncode blocks"""
-        block = self.generate_block_lines(env, next.map[0] if next else None)
-        if self.noncode_blocks:
-            yield from self.noncode_string(block, next, env)
+    def noncode_block(self, env, next=None, comment=False, **kwargs):
+        """dispatch comments of bock strings for noncode blocks"""
+        from markdown_it.token import Token
+
+        if isinstance(next, Token):
+            next = next.map[0]
+        block = self.generate_block_lines(env, next)
+        if comment or env.get("comment") or not self.noncode_blocks:
+            yield from self.generate_comment(block, None, env, **kwargs)
         else:
-            yield from self.generate_comment(block, None, env)
+            yield from self.noncode_string(block, next, env, **kwargs)
 
-    def noncode_string(self, block, next, env, paren=True):
+    def generate_comment(self, block, token, env, *, prepend="", **kwargs):
+        if self.comment_prefix_line:
+            yield from self.noncode_whitespace(env)
+            pre = SP * self.generate_env_indent(env, token) + self.COMMENT_MARKER
+            for line in block:
+                if line.strip():
+                    yield from self.noncode_whitespace(env)
+                    yield self.COMMENT_MARKER + " "
+                    yield line
+                else:
+                    env["whitespace"].write(line)
+            yield from self.noncode_whitespace(env)
+        else:
+            self.generate_wrapped_lines(
+                block, lead=(prepend or "") + self.COMMENT_MARKER[0], trail=self.COMMENT_MARKER[1]
+            )
+
+    def noncode_string(
+        self,
+        block,
+        next_block,
+        env,
+        paren=True,
+        hanging=False,
+        prepend="",
+        append="",
+        whitespace=True,
+    ):
         """generate a block string from a noncode block"""
-        block = dedent("".join(block))
+        block = "".join(block)
+        if env.get("hanging"):
+            block = StringIO(block)
+            try:
+                block = next(block) + dedent("".join(block))
+            except StopIteration:
+                return
+        else:
+            block = dedent(block)
         body = block.lstrip()
         start = len(block) - len(body)
         body = body.rstrip()
         end = start + len(body)
-        prior_whitespace = StringIO(block[:start])
-        pre = "\\" if env.get("continued") else ""
+        env["whitespace"].write(block[:start])
 
         # yield any preceeding whitespace
-        for _ in prior_whitespace:
-            yield pre + "\n"
+        body = self.escape(body)
         if body:
+            yield from self.noncode_whitespace(env)
             # noncode blocks that end with a line continuation
             # will continue that line to the next code or non-code block
-            continued = body.endswith("\\")
-            if continued:
-                body = body[:-1]
+            env["continued"] = body.endswith("\\")
+            if env["continued"]:
+                body = body[:-2]
             # place tight quote before the block string body
-            yield SP * self.get_indent(env)
+            if not env.get("hanging"):
+                yield SP * self.get_indent(env)
+            yield prepend
             if not env.get("quoted"):
                 if paren and self.include_quote_parenthesis:
                     yield "("
                 yield self.STRING_MARKER[0]
-        yield from StringIO(self.escape(body))
+        yield from StringIO(body)
         if body:
             # place tight quote after the block string body
             if not env.get("quoted"):
                 yield self.STRING_MARKER[1]
                 if paren and self.include_quote_parenthesis:
                     yield ")"
-            if next is None:
+            yield append
+            if next_block is None:
                 yield ";"
-        for line in StringIO(block[end:]):
-            if continued:
-                yield "\\"
-            yield line
+        env["whitespace"].write(block[end:])
+        if whitespace:
+            yield from self.noncode_whitespace(env)
+
+    def noncode_whitespace(self, env):
+        indent = self.get_indent(env)
+        env["whitespace"].seek(0)
+        for line in env["whitespace"]:
+            if line.endswith("\n"):
+                if env.get("continued"):
+                    yield SP * indent
+                    yield "\\"
+                yield "\n"
+        env["whitespace"] = StringIO()
 
     def render_lines(self, source):
         return self.render("".join(source)).splitlines(True)
@@ -376,7 +456,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         env["quoted"] = token.meta.get("is_quoted")
         env["continued"] = token.meta.get("is_continued")
         env["indented"] = token.meta.get("is_indented")
-        env["last_indent"] = token.meta.get("last_indent")
+        env["last_indent"] = token.meta.get("last_indent", env["last_indent"])
         env["next_code"] = token.meta.get("next_code")
         env.update(kwargs)
 
@@ -401,9 +481,3 @@ def is_urls(tokens):
             continue
         return False
     return True
-
-
-def _css(body):
-    from IPython.display import HTML
-
-    return HTML("<style>{}</style>".format(body))
