@@ -2,9 +2,6 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from shlex import split
 from typing import Any
-
-from arrow import get
-
 from .tangle import Tangle
 from ._argparser import parser
 
