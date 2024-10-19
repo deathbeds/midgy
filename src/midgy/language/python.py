@@ -51,7 +51,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         dot="midgy.types:Dot",
         md="midgy.types:Markdown",
         lisp="midgy.types:Hy.eval",
-        hy="midgy.types:Hy.eval"
+        hy="midgy.types:Hy.eval",
     )
     fenced_code_blocks: list = field(
         default_factory=["python", "python3", "ipython3", "ipython", ""].copy
@@ -152,6 +152,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             if token.meta.get("is_doctest"):
                 if self.doctest_code_blocks:
                     yield from self.fence_doctest(token, env)
+                    raise NotImplementedError()
             elif self.fenced_code_blocks:
                 lang = self.get_lang(token)
                 # format the prior non-code
@@ -164,7 +165,6 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
                     yield from self.fence_noncode(token, env)
             else:
                 return
-            self.update_env(token, env, continued=False)
             yield ""
 
     def fence_code(self, token, env):
@@ -185,11 +185,10 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         # comment out the last of fence dashes
         yield self.COMMENT_MARKER
         yield from self.generate_block_lines(env, token.map[1])
-        self.update_env(token, env)
+        self.update_env(token, env, quoted=False, continued=False)
         # we don't allow for continued blocks or explicit quotes with code fences.
         # these affordances are only possible with indented code blocks.
         # continutation can be acheived using parenthesis continuation
-        env.update(quoted=False, continued=False)
 
     def fence_doctest(self, token, env):
         """render code fence as python code"""
@@ -237,7 +236,6 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
             yield last[-1]
         else:
             yield from rest
-        env.update(continued=False if method else env.get("continued"))
 
     def front_matter(self, token, env):
         """render front matter as python code with an optional variable name"""
