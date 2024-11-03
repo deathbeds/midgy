@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from doctest import DocTestFinder, DocTestRunner
 from importlib import import_module
 from shlex import split
 from typing import Any
@@ -50,10 +51,6 @@ def weave(
     from IPython import get_ipython
 
     shell = get_ipython()
-    try:
-        from rich import print
-    except ModuleNotFoundError:
-        from builtins import print
     unittest = kwargs.pop("unittest", unittest)
     env = None
     if shell and language is None:
@@ -79,7 +76,7 @@ def weave(
 
     if show:
         # rich uses bbcode to format strings so we need to duck that
-        print(self.out.replace("[", r"\["))
+        print(self.out)
 
     try:
         if run:
@@ -90,12 +87,14 @@ def weave(
 
         data = {"text/x-python": self.out}
         from IPython.display import display
-        if weave and self.tokens[0].map[0] == int(magic):
 
+        if weave and self.tokens[0].map[0] == int(magic):
             if html:
                 output = self.parser.parser.render(
                     self.environment.from_string(self.source).render(), env
-                )
+                ).rstrip()
+                while output.endswith("< />"):
+                    output = output.removesuffix("< />")
                 data.update({"text/html": output})
                 if env:
                     env.pop("duplicate_refs", None)
@@ -115,15 +114,17 @@ def quick_doctest(source, name="__main__"):
     from IPython import get_ipython
 
     shell = get_ipython()
+    optionflags = shell.weave.doctest_flags or ELLIPSIS
+    verbose = False
     # this should returned a structured data repr
-    return run_docstring_examples(
-        source,
-        dict(vars(import_module(name))),
-        False,
-        f"In [{shell.execution_count-1}] tests",
-        None,
-        shell.weave.doctest_flags or ELLIPSIS,
-    )
+    finder = DocTestFinder(verbose=verbose, recurse=False)
+    runner = DocTestRunner(verbose=verbose, optionflags=optionflags)
+    compileflags = None
+    globs = dict(vars(import_module(name)))
+    for test in finder.find(source, name, globs=globs):
+        for example in test.examples:
+            example.source = "".join(shell.transform_cell(example.source))
+        runner.run(test, compileflags=compileflags)
 
 
 def weave_argv(argv, magic=False):
