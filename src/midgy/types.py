@@ -1,4 +1,5 @@
 # all of these types should have magic counterparts
+from abc import ABCMeta
 from functools import cached_property, wraps
 from midgy.tangle import get_markdown_it
 
@@ -11,7 +12,14 @@ def enforce_cls(callable):
     return main
 
 
-class String(str):
+class StringOps(ABCMeta):
+    def __ror__(cls, left):
+        return cls(left)
+
+    __or__ = __ror__
+
+
+class String(str, metaclass=StringOps):
     @property
     def data(self):
         return self

@@ -220,7 +220,7 @@ class Tangle:
         parser.block.ruler.before("table", "front_matter", _front_matter_lexer)
         parser.use(footnote.footnote_plugin).use(deflist.deflist_plugin)
         parser.disable("footnote_tail")
-        parser.code_formatter = pygments.formatters.get_formatter_by_name("html", noclasses=True)
+        parser.code_formatter = pygments.formatters.get_formatter_by_name("html")
         parser.options["highlight"] = self.highlight
         return parser
 

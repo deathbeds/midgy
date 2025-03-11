@@ -94,7 +94,7 @@ def weave(
                     self.environment.from_string(self.source).render(), env
                 ).rstrip()
                 while output.endswith("< />"):
-                    output = output.removesuffix("< />")
+                    output = output.removesuffix("< />").rstrip()
                 data.update({"text/html": output})
                 if env:
                     env.pop("duplicate_refs", None)
