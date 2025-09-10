@@ -1,4 +1,4 @@
-import builtins
+import builtins, re
 from dataclasses import dataclass, field
 from doctest import ELLIPSIS
 from functools import lru_cache
@@ -55,6 +55,20 @@ class Tangle(HasTraits):
         return run_ipython(self.parser.render(code))
 
 
+is_midgy = re.compile(r"\s*%{2}(pidgy|midgy)?\s+")
+
+
+def midgy_transform(lines):
+    from IPython import get_ipython
+
+    for i, line in enumerate(lines):
+        if any(line.strip()):
+            break
+    if is_midgy.match(line):
+        return ["\n"] * i + get_ipython().tangle.render_lines(lines[i + 1 :])
+    return lines
+
+
 class Weave(HasTraits):
     enabled = Bool(True)
     display = Any(None)
@@ -76,7 +90,10 @@ class Weave(HasTraits):
                         break
 
                     display(shell.weave.display_cls(cell))
-                    if shell.weave.unittest and "doctest" not in shell.tangle.code_blocks:
+                    if (
+                        shell.weave.unittest
+                        and "doctest" not in shell.tangle.code_blocks
+                    ):
                         quick_doctest(cell)
 
                 return
@@ -135,3 +152,5 @@ def load_ipython_extension(shell):
         shell.register_magics(TangleMagic(shell))
         magic = shell.magics_manager.magics["cell"]["tangle"]
         shell.magics_manager.magics["cell"][""] = magic
+        if midgy_transform not in shell.input_transformer_manager.line_transforms:
+            shell.input_transformer_manager.line_transforms.insert(0, midgy_transform)
