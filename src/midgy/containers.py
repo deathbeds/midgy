@@ -9,7 +9,7 @@ from .language.python import Python
 class Lists(Python):
     def escape(self, body):
         """escape"""
-        body = re.compile("^(\s{,3}([\-\+\*\:]|[0-9]+[.\)]?)\s{,4})*").sub("", body)
+        body = re.compile(r"^(\s{,3}([\-\+\*\:]|[0-9]+[.\)]?)\s{,4})*").sub("", body)
         return super().escape(body)
 
     # the hyphen is a default choice for lists because they appear isomorphic to yaml lists

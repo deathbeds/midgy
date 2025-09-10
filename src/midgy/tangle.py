@@ -190,7 +190,7 @@ class Tangle:
         env = dict(**self.env or dict(), source=StringIO(src), last_line=0, last_indent=0)
         for token in filter(self.is_code_block, tokens):  # iterate through the tokens
             if not token.meta.get("is_magic"):
-                env["min_indent"] = min(env.get("min_indent", 9999), token.meta["min_indent"])
+                env["min_indent"] = min(env.get("min_indent", 9999), token.meta.get("min_indent", 0))
         env.setdefault("min_indent", 0)
         env.setdefault("whitespace", StringIO())
         return env
