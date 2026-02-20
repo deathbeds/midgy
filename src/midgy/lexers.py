@@ -1,5 +1,5 @@
 from re import compile
-
+import markdown_it
 BLOCK, FENCE, PYCON = "code_block", "fence", "pycon"
 DOCTEST_CHARS = 62, 62, 62, 32  # >>>S
 ELLIPSIS_CHARS = (ord("."),) * 3 + (32,)
@@ -32,6 +32,7 @@ def code_lexer(state, start, end, silent=False):
         state.line = last_line + 1
         token = state.push(BLOCK, "code", 0)
         token.content = state.getLines(start, state.line, 4 + state.blkIndent, True)
+        
         token.map = [start, state.line]
         token.meta.update(
             first_indent=first_indent,
@@ -128,6 +129,7 @@ def code_fence_lexer(state, *args, **kwargs):
             is_magic_info=bool(MAGIC.match(token.info)),
             is_magic=bool(MAGIC.match(token.content)),
             is_doctest=token.info == PYCON,
+            autoclose=not state.getLines(state.line - 1, state.line, 4 + state.blkIndent, True).startswith(token.markup),
             **content_state(token),
         )
     return result

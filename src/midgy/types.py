@@ -37,16 +37,20 @@ class String(str, metaclass=StringOps):
     rstrip = enforce_cls(str.rstrip)
     upper = enforce_cls(str.upper)
     lower = enforce_cls(str.lower)
+    ext = ".txt"
 
     @enforce_cls
     def render(self, *args, **kwargs):
+        from functools import reduce
         from IPython import get_ipython
 
         shell = get_ipython()
         if shell:
-            from midgy._magics import get_environment
-
-            return get_environment().from_string(self).render(*args, **kwargs)
+            import builtins
+            from IPython import get_ipython
+            shell = get_ipython()
+            kwargs = vars(builtins) | shell.user_ns | kwargs
+            return shell.env.from_string(self, name=F"{id(self)}.{self.ext}").render(reduce(dict.__or__, args + (kwargs,), {}))
         object.__getattribute__(self, "render")
 
 
@@ -152,3 +156,9 @@ class Hy(String):
     @classmethod
     def eval(cls, code):
         return cls(code)._eval()
+    
+    
+class Pug(String):
+    ext = ".pug"
+    
+    _repr_html_ = String.render

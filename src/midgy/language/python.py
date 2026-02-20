@@ -52,6 +52,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         md="midgy.types:Markdown",
         lisp="midgy.types:Hy.eval",
         hy="midgy.types:Hy.eval",
+        # pug is added optionally later
     )
     fenced_code_blocks: list = field(
         default_factory=["python", "python3", "ipython3", "ipython", ""].copy
@@ -197,6 +198,8 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
 
     def fence_noncode(self, token, env):
         """render a fence as a block string with an optional caller method"""
+        
+        closed = not token.meta.get("autoclose", None)
         yield SP * self.get_indent(env)
 
         # fence method are functions applied to block string in a fence like json, toml, tomli
@@ -212,7 +215,7 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
 
         # quote and escape the string block
         yield self.STRING_MARKER[0]
-        block = self.generate_block_lines(env, token.map[1] - 1)
+        block = self.generate_block_lines(env, token.map[1] - closed)
         block = self.generate_dedent_block(block, token.meta.get("min_indent"))
         yield from map(self.escape, block)
         yield self.STRING_MARKER[1]
@@ -223,8 +226,11 @@ class Python(Markdown, type="text/x-python", language="ipython3"):
         yield ")"
         if method:
             yield ")"
-        yield " # "
-        rest = self.generate_block_lines(env, token.map[1])
+        
+        rest = iter(["\n"])
+        if closed:
+            yield " # "
+            rest = self.generate_block_lines(env, token.map[1])
         if token.meta["next_code"] is None:
             last = next(rest)
             yield last[:-1]

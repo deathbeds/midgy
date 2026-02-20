@@ -1,37 +1,28 @@
-"""tangle transforms markdown to other programming and markup languages.
-
-this module provides the machinery to separate code and non-code blocks then recombine them into a target language. 
-midgy discovers code in indented or fenced blocks with an added ability to use doctests.
-non-code blocks exist between code blocks; they are typically rendered as strings or comments when the target language is produced.
-
-many language have block string or comment conventions that makes it possible provide a general 
-literate programming interface to many languages. in this approach, a project can be written
-documentation-first, completely in markdown easing the codification of language. 
-"""
-
-from dataclasses import dataclass
+from ..tangle import get_markdown_it
+import midgy
+from dataclasses import dataclass, field
 from functools import partial
-import importlib.metadata
 from io import StringIO
 from re import compile
 import re
 import importlib
-
-extra_eps = (
-    importlib.metadata.EntryPoint("yaml", "midgy", "midgy.language.yaml.Yaml"),
-    )
-
 import markdown_it
 import markdown_it.renderer
 import pygments
 
 __all__ = ()
+YAML = "yaml"
+TOML = "tomllib"
 
 DOCTEST_CHAR, CONTINUATION_CHAR, COLON_CHAR, QUOTES_CHARS = 62, 92, 58, {39, 34}
 BLOCK, FENCE, PYCON = "code_block", "fence", "pycon"
 SP, QUOTES = chr(32), (chr(34) * 3, chr(39) * 3)
 
 
+def get_lang(self, token):
+    """transform the fence info to the language it represents"""
+    lang = token.info.split(maxsplit=1)
+    return lang and lang[0] or ""
 class RendererHTML(markdown_it.renderer.RendererHTML):
     def renderToken(self, tokens, idx, options, env):
         string = super().renderToken(tokens, idx, options, env)
@@ -74,9 +65,7 @@ class Tangle:
         from importlib.metadata import entry_points
 
         try:
-            return next(iter(
-                importlib.metadata.EntryPoints(entry_points() + extra_eps)
-                .select(group="midgy", name=lang.lstrip(".")))).load()
+            return next(iter(entry_points(group="midgy", name=lang.lstrip(".")))).load()
         except StopIteration:
             return
 
@@ -286,28 +275,168 @@ class Tangle:
 
     def update_env(self, token, env, **kwargs):
         """update the state of the environment"""
-
-
+I = lambda *x: x and x[0] or None
+def get_ep(value):
+    return importlib.metadata.EntryPoint(None, value, None).load()
 @dataclass
-class Markdown(Tangle):
-    def eval(self, x):
-        return x
+class Yaml(Tangle):
+    noncode_blocks = True
+    COMMENT_MARKER = "# "
+    update_env = midgy.language.python.Python.update_env
+    get_indent = midgy.language.python.Python.get_indent
+    noncode_string = midgy.language.python.Python.noncode_string
+    escape = staticmethod(midgy.language.python.Python.escape)
+    noncode_whitespace = midgy.language.python.Python.noncode_whitespace
 
+    fenced_code_blocks: list = field(default_factory=["yaml", "yml"].copy)
+    fence_methods: dict = field(default_factory=dict(
+        json="json:loads",
+        json5="json5:loads",
+        yaml=I,
+        yml=I,
+        toml=f"{TOML}:loads"
+    ).copy)
+    
+    def update_env(self, token, env):
+        env["indented"] = token.content.rstrip().endswith(("|", ">"))
+        env["indented_block"] = token.content.rstrip().endswith((":",))
 
-def get_markdown_it(cache=True, cached={}):
-    from markdown_it import MarkdownIt
+    def noncode_block(self, env, next=None, comment=False, **kwargs):
+        """dispatch comments of bock strings for noncode blocks"""
+        from markdown_it.token import Token
 
-    if not cache:
-        return MarkdownIt(
-            "gfm-like",
-            options_update=dict(inline_definitions=True, langPrefix=""),
-            renderer_cls=RendererHTML,
-        )
-    if not cached:
-        cached["cache"] = get_markdown_it(False)
-    return cached["cache"]
+        if isinstance(next, Token):
+            next = next.map[0]
+        block = self.generate_block_lines(env, next)
+        if comment or env.get("comment") or not self.noncode_blocks:
+            yield from self.generate_comment(block, None, env, **kwargs)
+        else:
+            yield from self.noncode_string(block, next, env, **kwargs)
+    
+    def generate_noncode(self, env, token):
+        block = super().generate_noncode(env, token)
+        if env.get("indented"):
+            yield from map((" " * self.get_indent(env)).__add__, block)
+        else:
+            yield from self.generate_comment(block, token, env, prepend="")
+            
+    def fence(self, token, env):
+        """dispatch different renderings of code fences."""
+        if "~" not in token.markup:
+            # tilde fences do not tangle. maybe make this configurable
+            lang = self.get_lang(token)
+            # format the prior non-code
+            yield from self.noncode_block(env, token)
+            if lang in self.fenced_code_blocks:
+                # render fence as python code
+                yield from self.fence_code(token, env)
+            else:
+                # render fence as block string
+                yield from self.fence_noncode(token, env)
+    
+    def fence_code(self, token, env):
+        """render code fence as python code"""
 
+        # comment out the first line of the fence dashes
+        yield self.COMMENT_MARKER
+        yield from self.generate_block_lines(env, token.map[0] + 1)
 
-class Tangled(str):
-    def _ipython_display_(self):
-        print(self)
+        block = self.generate_block_lines(env, token.map[1] - 1)
+        if self.include_magic and token.meta.get("is_magic"):
+            # render the fence content as a cell magic invocation
+            yield from self.cell_magic(token, block, env)
+        else:
+            # dedent the code like we would an indent code block
+            yield from self.generate_dedent_block(block, env["min_indent"])
+
+        # comment out the last of fence dashes
+        yield self.COMMENT_MARKER
+        yield from self.generate_block_lines(env, token.map[1])
+        self.update_env(token, env, quoted=False, continued=False)
+        # we don't allow for continued blocks or explicit quotes with code fences.
+        # these affordances are only possible with indented code blocks.
+        # continutation can be acheived using parenthesis continuation
+    
+    def fence_noncode(self, token, env):
+        """render a fence as a block string with an optional caller method"""
+        
+        closed = not token.meta.get("autoclose")
+        
+        method = self.get_fence_method(token)
+
+        if isinstance(method, str):
+            method = get_ep(method)
+        # else:
+        #     return
+
+        
+        whitespace = SP * (self.get_indent(env) + 4)
+        # fence method are functions applied to block string in a fence like json, toml, tomli
+        
+
+        # parenthesis are used to group strings together and allow for methods to called on the block string.
+        # group and comment out the first line of the fence dashes
+        yield whitespace
+        yield "# "
+        yield from self.generate_block_lines(env, token.map[0] + 1)
+        block = self.generate_block_lines(env, token.map[1] - closed)
+        block = self.generate_dedent_block(block, token.meta.get("min_indent"))
+
+        # if there is a method then we wanna make it yaml.
+        # yaml can 
+        if callable(method):
+            if method:
+                block = __import__("yaml").safe_dump(method("".join(block))).splitlines()
+
+        line = ""
+        for line in map(self.escape, map(whitespace.__add__, block)):
+            yield line
+
+        if not line.endswith("\n"):
+            yield "\n"
+            
+        # close the fence group and comment out the last fence dashes
+        # this syntax restricuts from using line continuations like indented code blocks
+        # if the comment were dropped then we could use continuations
+        
+        rest = iter(["\n"])
+        if closed:
+            yield whitespace
+            yield "# "
+            rest = self.generate_block_lines(env, token.map[1])
+        yield from rest
+
+    def get_fence_method(self, token):
+        """map the code fence info to python method"""
+        lang = self.get_lang(token)
+        method = self.fence_methods.get(lang, lang)
+        if ":" in method:
+            return method
+        return ""
+
+    def get_lang(self, token):
+        """transform the fence info to the language it represents"""
+        lang = token.info.split(maxsplit=1)
+        return lang and lang[0] or ""
+    
+def load_ipython_extension(shell):
+    shell.register_magic_function(yaml_magic, "cell", "yaml")
+
+parser = __import__("argparse").ArgumentParser()
+
+parser.add_argument("name", default=None, nargs="?") 
+
+def yaml_magic(line, cell):
+    from IPython.display import HTML, display   
+    args, rest = parser.parse_known_args(__import__
+                                         ("shlex").split(line))    
+    import midgy.language.yaml, yaml
+    shell = get_ipython()
+    input = midgy.language.yaml.Yaml().render(cell)
+    if args.name:
+        shell.user_ns[args.name]
+    display(HTML(shell.markdown.render(cell)))
+    return yaml.safe_load(input)
+    
+
+    
